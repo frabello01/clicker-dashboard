@@ -22,6 +22,24 @@ export function swipeBack(client: INomixClient, deviceId: string): Promise<void>
   return client.swipe(deviceId, [5000, 16000], { right: 20000, duration: 300 });
 }
 
+/**
+ * Force the phone back to the Home Screen.
+ *
+ * Face ID iPhones: swipe up from the very bottom edge ≈ "Home gesture".
+ * Works from any app and from App Library / Notification Center / Spotlight.
+ * Idempotent: doing it from Home is a no-op visually.
+ */
+export async function goHome(
+  client: INomixClient,
+  deviceId: string
+): Promise<void> {
+  await client.swipe(deviceId, [16384, 32500], {
+    up: 17500,
+    duration: 300,
+  });
+  await sleep(1200); // home animation
+}
+
 /** Swipe up to the next item in a vertical feed. */
 export function swipeFeed(client: INomixClient, deviceId: string): Promise<void> {
   return client.swipe(deviceId, [16383, 26213], { up: 6553, duration: 100 });
@@ -55,6 +73,10 @@ export async function openApp(
   { retries = 1 }: { retries?: number } = {}
 ): Promise<Screen | null> {
   for (let attempt = 1; attempt <= retries; attempt++) {
+    // Always start from a known state — Home Screen. Otherwise if the phone
+    // is in App Library / another app, the swipe-down won't open Spotlight.
+    await goHome(client, deviceId);
+
     // Swipe down from middle-upper area to invoke Spotlight
     await client.swipe(deviceId, [16000, 10000], { down: 8000, duration: 300 });
     await sleep(500);

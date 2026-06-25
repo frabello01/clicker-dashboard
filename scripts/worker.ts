@@ -46,7 +46,9 @@ process.on("SIGTERM", () => {
 async function processClaimedJob(initial: Job): Promise<void> {
   let job: Job | null = initial;
   let loops = 0;
+  let consecutiveErrors = 0;
   while (job && loops < MAX_TICK_LOOPS && !stopping) {
+    loops += 1;
     if (job.status !== "running" && job.status !== "pending") {
       console.log(
         `[${ts()}] Job ${job.id} status changed to ${job.status} — releasing`
@@ -56,9 +58,26 @@ async function processClaimedJob(initial: Job): Promise<void> {
     const deadlineMs = Date.now() + PER_TICK_BUDGET_MS;
     const result = await runJobTick(job, deadlineMs);
     console.log(
-      `[${ts()}] tick ${job.id} done=${result.done} error=${result.error ?? "-"}`
+      `[${ts()}] tick ${job.id} done=${result.done} error=${result.error ?? "-"} (loop ${loops}/${MAX_TICK_LOOPS})`
     );
     if (result.done) return;
+
+    if (result.error) {
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= 10) {
+        await failJob(
+          job.id,
+          job.state,
+          `worker: ${consecutiveErrors} consecutive errors, last: ${result.error}`
+        );
+        console.error(
+          `[${ts()}] Job ${job.id} aborted: ${consecutiveErrors} consecutive errors`
+        );
+        return;
+      }
+    } else {
+      consecutiveErrors = 0;
+    }
 
     // Re-fetch from DB: persistJob/failJob/finishJob have written latest state,
     // and the user may have cancelled mid-tick.
