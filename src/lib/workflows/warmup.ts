@@ -28,8 +28,8 @@ import {
   swipeFeed,
 } from "@/lib/nomix/actions";
 import { parseScreen } from "@/lib/nomix/screen";
+import { Screen } from "@/lib/nomix/screen";
 import {
-  chanceTap,
   isAd,
   openReels,
   postComment,
@@ -129,38 +129,46 @@ export async function tickWarmup(
     ...(rawState ?? {}),
   };
 
-  switch (state.phase) {
-    case "open_app": {
-      const opened = await openApp(client, deviceId, "instagram");
-      if (!opened) {
-        return { state, done: false, error: "openApp(instagram) failed" };
-      }
-      state.phase = "open_reels";
+  // Phases chain inside the same tick where possible so we don't waste a
+  // whole cron interval (~60s) between e.g. open_app and open_reels. Each
+  // step checks the deadline before running so a tight budget bails early.
+
+  let seedScreen: Screen | null = null;
+
+  if (state.phase === "open_app") {
+    const opened = await openApp(client, deviceId, "instagram");
+    if (!opened) {
+      return { state, done: false, error: "openApp(instagram) failed" };
+    }
+    seedScreen = opened;
+    state.phase = "open_reels";
+  }
+
+  if (state.phase === "open_reels") {
+    if (Date.now() > deadlineMs - DEADLINE_MARGIN_MS) {
+      // Out of budget — save progress, next tick picks up open_reels.
       return { state, done: false };
     }
-
-    case "open_reels": {
-      const ok = await openReels(client, deviceId);
-      if (!ok) {
-        return { state, done: false, error: "openReels failed" };
-      }
-      state.phase = "scrolling";
-      state.scrolling_started_at = new Date().toISOString();
-      return runScrollingPhase(client, deviceId, state, payload, deadlineMs);
+    const ok = await openReels(client, deviceId, seedScreen ?? undefined);
+    if (!ok) {
+      return { state, done: false, error: "openReels failed" };
     }
-
-    case "scrolling":
-      return runScrollingPhase(client, deviceId, state, payload, deadlineMs);
-
-    case "close_app": {
-      await closeApp(client, deviceId);
-      state.phase = "done";
-      return { state, done: true };
-    }
-
-    case "done":
-      return { state, done: true };
+    state.phase = "scrolling";
+    state.scrolling_started_at = new Date().toISOString();
   }
+
+  if (state.phase === "scrolling") {
+    return runScrollingPhase(client, deviceId, state, payload, deadlineMs);
+  }
+
+  if (state.phase === "close_app") {
+    await closeApp(client, deviceId);
+    state.phase = "done";
+    return { state, done: true };
+  }
+
+  // state.phase === "done"
+  return { state, done: true };
 }
 
 // ---------------- Scrolling phase ----------------

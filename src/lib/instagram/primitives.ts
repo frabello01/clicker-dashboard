@@ -158,34 +158,29 @@ export async function postComment(
 // ---------------- Reels navigation ----------------
 
 /**
- * Navigate to the Reels tab. Tries up to 3 times. If `initialScreen` is
- * passed, the first attempt reuses it; otherwise re-parses each loop.
+ * Navigate to the Reels tab inside Instagram.
  *
- * Returns true once the parsed description mentions "reel".
+ * Single attempt: find the Reels tab/button in the bottom nav, tap it, verify
+ * we landed somewhere whose description mentions "reel". No retry loop — the
+ * cron is the retry. No fallback center-tap on failure (was opening random
+ * things). Pass `initialScreen` from openApp to skip an extra parseScreen.
  */
 export async function openReels(
   client: INomixClient,
   deviceId: string,
   initialScreen?: Screen
 ): Promise<boolean> {
-  let seed = initialScreen;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    if (seed) {
-      const coords = seed.find("reels");
-      if (coords) await client.click(deviceId, coords);
-    } else {
-      const fresh = await parseScreen(client, deviceId);
-      if (fresh) await fresh.findAndClick(client, deviceId, "reels");
-    }
-    seed = undefined;
+  const seed = initialScreen ?? (await parseScreen(client, deviceId));
+  if (!seed) return false;
 
-    await sleep(1500);
-    const check = await parseScreen(client, deviceId);
-    if (check && check.description.toLowerCase().includes("reel")) {
-      return true;
-    }
-    // Reset state with a center tap, then try again
-    await client.click(deviceId, [16383, 16383]);
-  }
-  return false;
+  // Restrict to tab/button/icon — never an image or random text element.
+  const tapped = await seed.findAndClick(client, deviceId, "reels", {
+    types: ["tab", "button", "icon"],
+  });
+  if (!tapped) return false;
+
+  await sleep(1500);
+  const check = await parseScreen(client, deviceId);
+  if (!check) return false;
+  return check.description.toLowerCase().includes("reel");
 }
