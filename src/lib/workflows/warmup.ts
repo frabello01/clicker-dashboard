@@ -92,10 +92,15 @@ const NEW_STATE: WarmupState = {
   comments: 0,
 };
 
-/** Safety margin: stop the scrolling loop this many ms before deadline.
- *  Reduced from 15s — most scroll cycles are 5-15s; 10s buffer is enough
- *  to let the in-flight cycle finish and the dispatcher persist state. */
-const DEADLINE_MARGIN_MS = 10_000;
+/**
+ * Safety margin: don't START a new scroll cycle if less than this remains.
+ * A slow-path cycle (parseScreen + like + comment without cache) can take
+ * up to ~25s. If we start one with < 25s left, the function gets hard-
+ * killed by Vercel before we can persist — losing the entire tick and
+ * forcing cron to retry, during which time the phone sits on the same
+ * reel. 25s margin guarantees the in-flight cycle finishes within budget.
+ */
+const DEADLINE_MARGIN_MS = 25_000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -187,8 +192,6 @@ async function runScrollingPhase(
     state.scrolling_started_at = new Date().toISOString();
   }
   const totalSeconds = payload.duration_minutes * 60;
-  // Ensure cache survives across iterations within this tick AND across ticks
-  // (it's already part of state, so persisted automatically).
   if (!state.comment_cache) state.comment_cache = {};
 
   while (Date.now() < deadlineMs - DEADLINE_MARGIN_MS) {
@@ -197,12 +200,21 @@ async function runScrollingPhase(
       return { state, done: false };
     }
 
-    const stepError = await doScrollCycle(client, deviceId, state, payload);
+    // If only a fast-path cycle would fit, force fast-path (skip like/comment).
+    // Prevents a slow-path cycle from blowing budget mid-scroll.
+    const remainingMs = deadlineMs - Date.now();
+    const forceFastPath = remainingMs < 35_000;
+
+    const stepError = await doScrollCycle(
+      client,
+      deviceId,
+      state,
+      payload,
+      forceFastPath
+    );
     if (stepError) {
       return { state, done: false, error: stepError };
     }
-    // No trailing sleep — the per-reel watch time is now inside doScrollCycle
-    // so the configured pause IS the total time per reel.
   }
 
   return { state, done: false };
@@ -221,7 +233,8 @@ async function doScrollCycle(
   client: INomixClient,
   deviceId: string,
   state: WarmupState,
-  payload: WarmupPayload
+  payload: WarmupPayload,
+  forceFastPath = false
 ): Promise<string | undefined> {
   // Skip swipe on the first Reel of the warmup.
   if (state.scrolls > 0) {
@@ -232,8 +245,10 @@ async function doScrollCycle(
     payload.pause_seconds_min,
     payload.pause_seconds_max
   );
-  const rollLike = Math.random() < payload.like_chance;
-  const rollComment = Math.random() < payload.comment_chance;
+  const rollLike = forceFastPath ? false : Math.random() < payload.like_chance;
+  const rollComment = forceFastPath
+    ? false
+    : Math.random() < payload.comment_chance;
 
   // Fast path — vast majority of reels: no like, no comment, no ad check.
   // Just wait the watch time and swipe next.
