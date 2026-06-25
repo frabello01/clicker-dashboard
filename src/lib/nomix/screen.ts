@@ -32,15 +32,17 @@ export class Screen {
    */
   find(
     keywords: string | string[],
-    opts: { interactiveOnly?: boolean } = {}
+    opts: { interactiveOnly?: boolean; types?: ScreenElement["type"][] } = {}
   ): Coords | null {
     const kws = (Array.isArray(keywords) ? keywords : [keywords]).map((k) =>
       k.toLowerCase()
     );
     const interactiveOnly = opts.interactiveOnly ?? true;
+    const typeFilter = opts.types;
     for (const kw of kws) {
       for (const el of this.state.elements) {
         if (!el.content) continue;
+        if (typeFilter && !typeFilter.includes(el.type)) continue;
         if (!el.content.toLowerCase().includes(kw)) continue;
         if (interactiveOnly && !el.interactivity) continue;
         return el.center;
@@ -54,7 +56,7 @@ export class Screen {
     client: INomixClient,
     deviceId: string,
     keywords: string | string[],
-    opts: { interactiveOnly?: boolean } = {}
+    opts: { interactiveOnly?: boolean; types?: ScreenElement["type"][] } = {}
   ): Promise<boolean> {
     const coords = this.find(keywords, opts);
     if (!coords) return false;

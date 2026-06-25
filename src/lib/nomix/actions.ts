@@ -63,9 +63,13 @@ export async function openApp(
     await sleep(2000);
 
     const search = await parseScreen(client, deviceId);
-    if (!search || !(await search.findAndClick(client, deviceId, appName))) {
-      continue;
-    }
+    if (!search) continue;
+    // Specifically tap an icon/button element — not the search input field
+    // (which also matches the keyword because we just typed it there).
+    const tapped = await search.findAndClick(client, deviceId, appName, {
+      types: ["icon", "button"],
+    });
+    if (!tapped) continue;
 
     await sleep(3000);
     const opened = await parseScreen(client, deviceId);
