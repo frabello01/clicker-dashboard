@@ -8,8 +8,12 @@
 -- Uses FOR UPDATE SKIP LOCKED so concurrent cron invocations never collide.
 -- Returns NULL if nothing is claimable.
 
+-- Drop the previous single-row return variant if upgrading from an earlier
+-- version of this file — the return type can't be changed in place.
+drop function if exists public.claim_next_job(integer);
+
 create or replace function public.claim_next_job(p_lock_seconds int default 90)
-returns public.jobs
+returns setof public.jobs
 language plpgsql
 as $$
 declare
@@ -36,7 +40,7 @@ begin
   for update skip locked;
 
   if not found then
-    return null;
+    return;
   end if;
 
   update public.jobs
@@ -49,7 +53,7 @@ begin
   where id = claimed.id
   returning * into claimed;
 
-  return claimed;
+  return next claimed;
 end;
 $$;
 

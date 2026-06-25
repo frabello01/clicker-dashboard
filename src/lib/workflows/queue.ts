@@ -48,7 +48,9 @@ export async function claimNextJob(
     p_lock_seconds: lockSeconds,
   });
   if (error) throw error;
-  return (data as Job | null) ?? null;
+  // claim_next_job returns SETOF jobs — empty array means "nothing to claim".
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row as Job | undefined) ?? null;
 }
 
 /**

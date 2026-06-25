@@ -343,12 +343,12 @@ export type Database = {
           state: Json
           status: string
           updated_at: string
-        }
+        }[]
         SetofOptions: {
           from: "*"
           to: "jobs"
-          isOneToOne: true
-          isSetofReturn: false
+          isOneToOne: false
+          isSetofReturn: true
         }
       }
     }
