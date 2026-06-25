@@ -40,12 +40,20 @@ export const env = {
 
 /**
  * Public env — usable from client components. Server-only secrets are excluded.
+ *
+ * Next.js inlines `process.env.NEXT_PUBLIC_*` into the client bundle only when
+ * accessed with literal dot notation. Bracket notation (process.env[name]) is
+ * not statically analyzable and yields undefined on the client.
  */
 export const publicEnv = {
   get supabaseUrl() {
-    return env.supabaseUrl;
+    const v = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!v) throw new Error("Missing required env var: NEXT_PUBLIC_SUPABASE_URL");
+    return v;
   },
   get supabaseAnonKey() {
-    return env.supabaseAnonKey;
+    const v = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!v) throw new Error("Missing required env var: NEXT_PUBLIC_SUPABASE_ANON_KEY");
+    return v;
   },
 };
