@@ -188,63 +188,88 @@ async function runScrollingPhase(
 
     const stepError = await doScrollCycle(client, deviceId, state, payload);
     if (stepError) {
-      // Transient error — surface it but don't abandon the workflow; the
-      // caller will increment attempts and reschedule.
       return { state, done: false, error: stepError };
     }
-
-    // Pause between Reels (random within the configured range)
-    const pauseS = randBetween(
-      payload.pause_seconds_min,
-      payload.pause_seconds_max
-    );
-    await sleep(pauseS * 1000);
+    // No trailing sleep — the per-reel watch time is now inside doScrollCycle
+    // so the configured pause IS the total time per reel.
   }
 
   return { state, done: false };
 }
 
+/**
+ * One reel: swipe (if not first), then either:
+ *   (fast path) when no like/comment rolled, just sleep the watch time.
+ *   (slow path) parseScreen once, then run like/comment within the watch
+ *               budget so the total time per reel == configured pause.
+ *
+ * The configured `pause_seconds_min..max` is the TOTAL human-watching time
+ * for the reel — not extra delay added on top of API+vision latency.
+ */
 async function doScrollCycle(
   client: INomixClient,
   deviceId: string,
   state: WarmupState,
   payload: WarmupPayload
 ): Promise<string | undefined> {
-  // Skip the swipe on the very first Reel of the entire warmup.
+  // Skip swipe on the first Reel of the warmup.
   if (state.scrolls > 0) {
     await swipeFeed(client, deviceId);
-    await randomSleep(0.3, 0.8);
   }
 
-  await sleep(1000);
-  const screen = await parseScreen(client, deviceId);
-  if (!screen) {
-    return "parseScreen returned null";
-  }
+  const watchSec = randBetween(
+    payload.pause_seconds_min,
+    payload.pause_seconds_max
+  );
+  const rollLike = Math.random() < payload.like_chance;
+  const rollComment = Math.random() < payload.comment_chance;
 
-  if (isAd(screen)) {
-    await screen.findAndClick(client, deviceId, ["close", "back"]);
-    await sleep(500);
+  // Fast path — vast majority of reels: no like, no comment, no ad check.
+  // Just wait the watch time and swipe next.
+  if (!rollLike && !rollComment) {
+    await sleep(watchSec * 1000);
     state.scrolls += 1;
     return;
   }
 
-  await randomSleep(1.5, 6.0);
+  // Slow path — at least one action wanted. Parse once to find the buttons
+  // (and detect ad). Pack actions inside the watch budget.
+  const start = Date.now();
+  await sleep(700); // brief settle after swipe so the new reel is up
+  const screen = await parseScreen(client, deviceId);
+  if (!screen) return "parseScreen returned null";
 
-  if (await chanceTap(client, deviceId, screen, "like", payload.like_chance)) {
-    state.likes += 1;
-    await randomSleep(0.5, 1.2);
+  if (isAd(screen)) {
+    await screen.findAndClick(client, deviceId, ["close", "back"]);
+    state.scrolls += 1;
+    return;
   }
 
-  if (
-    await chanceTap(client, deviceId, screen, "comment", payload.comment_chance)
-  ) {
-    await sleep(2000);
+  // Spend 30-60% of watch time before tapping like (a human watches a bit first)
+  const preActionSec = randBetween(
+    Math.min(1, watchSec * 0.3),
+    Math.min(3, watchSec * 0.6)
+  );
+  await sleep(preActionSec * 1000);
+
+  if (rollLike) {
+    if (await screen.findAndClick(client, deviceId, "like")) state.likes += 1;
+    await randomSleep(0.4, 1.0);
+  }
+
+  if (rollComment) {
+    await sleep(1000);
     const posted = await postComment(client, deviceId, randomComment(), {
       cache: state.comment_cache,
     });
     if (posted) state.comments += 1;
   }
+
+  // Sleep remaining of watch budget (if any). If we overran, skip the wait
+  // entirely — already enough latency for a real human.
+  const elapsedMs = Date.now() - start;
+  const remainingMs = watchSec * 1000 - elapsedMs;
+  if (remainingMs > 0) await sleep(remainingMs);
 
   state.scrolls += 1;
 }
