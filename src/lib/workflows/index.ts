@@ -19,8 +19,24 @@ import {
 const NEXT_TICK_DELAY_SECONDS = 30;
 /** After a recoverable error, back off a bit longer. */
 const ERROR_RETRY_DELAY_SECONDS = 60;
+/** When the vision pipeline is disconnected (NMX Viewer offline / no frame),
+ *  back off MUCH longer — retrying every 15s just spams Nomix API while the
+ *  user is presumably reconnecting the broadcast on the phone. */
+const NMX_DISCONNECTED_DELAY_SECONDS = 120;
 /** Hard cap on tick attempts before we mark the job failed. */
 const MAX_ATTEMPTS = 20;
+
+/** Heuristic: error string indicates the phone's NMX Viewer broadcast has
+ *  stopped. Surfaces from Nomix with messages like "No frame available". */
+function isNmxDisconnected(message: string | undefined): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("no frame available") ||
+    lower.includes("restart broadcast") ||
+    lower.includes("nmx viewer")
+  );
+}
 
 export type RunResult = {
   jobId: string;
@@ -74,7 +90,10 @@ export async function runJobTick(
         // visibility into what's wrong.
         const message = e instanceof Error ? e.message : String(e);
         const nextState = (state ?? {}) as WarmupState;
-        if (job.attempts >= MAX_ATTEMPTS) {
+        const isDisc = isNmxDisconnected(message);
+        // NMX disconnect doesn't count toward MAX_ATTEMPTS — it's a temporary
+        // user-fixable situation, not a workflow bug.
+        if (!isDisc && job.attempts >= MAX_ATTEMPTS) {
           await failJob(job.id, nextState, `tick threw: ${message}`);
           return {
             jobId: job.id,
@@ -84,7 +103,9 @@ export async function runJobTick(
           };
         }
         await persistJob(job.id, nextState, {
-          nextRunInSeconds: ERROR_RETRY_DELAY_SECONDS,
+          nextRunInSeconds: isDisc
+            ? NMX_DISCONNECTED_DELAY_SECONDS
+            : ERROR_RETRY_DELAY_SECONDS,
           error: `tick threw: ${message}`,
         });
         return {
@@ -114,8 +135,11 @@ export async function runJobTick(
         };
       }
 
+      const isDisc = isNmxDisconnected(result.error);
       await persistJob(job.id, result.state, {
-        nextRunInSeconds: result.error
+        nextRunInSeconds: isDisc
+          ? NMX_DISCONNECTED_DELAY_SECONDS
+          : result.error
           ? ERROR_RETRY_DELAY_SECONDS
           : NEXT_TICK_DELAY_SECONDS,
         error: result.error,
