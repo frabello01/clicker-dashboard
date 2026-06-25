@@ -11,7 +11,6 @@ import type {
   ApiResult,
   Coords,
   DeviceStatus,
-  NomixDevice,
   ScreenState,
   ScrollDirection,
   SwipeOptions,
@@ -26,7 +25,7 @@ export class NomixError extends Error {
 
 export interface INomixClient {
   // Device management
-  listDevices(): Promise<NomixDevice[]>;
+  listDevices(): Promise<string[]>;
   getStatus(deviceId: string): Promise<DeviceStatus>;
   restart(deviceId: string): Promise<ApiResult>;
 
@@ -93,8 +92,8 @@ export class NomixClient implements INomixClient {
 
   // ----- Device management -----
 
-  listDevices(): Promise<NomixDevice[]> {
-    return this.req<NomixDevice[]>("/devices");
+  listDevices(): Promise<string[]> {
+    return this.req<string[]>("/devices");
   }
 
   getStatus(deviceId: string): Promise<DeviceStatus> {

@@ -8,7 +8,6 @@ import type {
   ApiResult,
   Coords,
   DeviceStatus,
-  NomixDevice,
   ScreenElement,
   ScreenState,
   ScrollDirection,
@@ -18,20 +17,11 @@ import type { INomixClient } from "./client";
 
 const ok = (msg = "mock ok"): ApiResult => ({ success: true, message: msg });
 
-const MOCK_DEVICES: NomixDevice[] = [
-  {
-    id: "mock-iphone-x-01",
-    alias: "iPhone X — slot 1 (mock)",
-    online: true,
-    last_seen: new Date().toISOString(),
-  },
-  {
-    id: "mock-iphone-x-02",
-    alias: "iPhone X — slot 2 (mock)",
-    online: false,
-    last_seen: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-  },
-];
+const MOCK_DEVICE_IDS = ["mock-iphone-x-01", "mock-iphone-x-02"] as const;
+const MOCK_DEVICE_CONNECTED: Record<string, boolean> = {
+  "mock-iphone-x-01": true,
+  "mock-iphone-x-02": false,
+};
 
 const MOCK_REELS_SCREEN: ScreenState = {
   app_name: "Instagram",
@@ -86,15 +76,17 @@ export class MockNomixClient implements INomixClient {
     console.log(`[nomix:mock] ${label}`, payload ?? "");
   }
 
-  async listDevices(): Promise<NomixDevice[]> {
+  async listDevices(): Promise<string[]> {
     this.log("listDevices");
-    return MOCK_DEVICES;
+    return [...MOCK_DEVICE_IDS];
   }
 
   async getStatus(deviceId: string): Promise<DeviceStatus> {
     this.log("getStatus", { deviceId });
-    const d = MOCK_DEVICES.find((d) => d.id === deviceId);
-    return { online: d?.online ?? false };
+    return {
+      device_id: deviceId,
+      connected: MOCK_DEVICE_CONNECTED[deviceId] ?? false,
+    };
   }
 
   async restart(deviceId: string): Promise<ApiResult> {

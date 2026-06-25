@@ -18,18 +18,14 @@ export type ApiResult = {
   message: string;
 };
 
-/** A Nomix dongle / iPhone pair as returned by GET /devices. */
-export type NomixDevice = {
-  id: string;
-  alias?: string;
-  online: boolean;
-  last_seen?: string;
-  // shape may evolve — keep extra fields available
-  [k: string]: unknown;
-};
-
+/**
+ * GET /devices returns a bare array of device IDs (the dongles attached to
+ * your Nomix account). To know if a device is online + connected you have
+ * to call GET /{deviceId}/status per device.
+ */
 export type DeviceStatus = {
-  online: boolean;
+  device_id: string;
+  connected: boolean;
   [k: string]: unknown;
 };
 
