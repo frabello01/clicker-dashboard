@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, RotateCcw, Pencil, Copy, Check } from "lucide-react";
+import { RefreshCw, RotateCcw, Pencil, Copy, Check, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,7 @@ export default function DevicesPage() {
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [restartingId, setRestartingId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -105,16 +106,37 @@ export default function DevicesPage() {
           <p className="section-eyebrow mb-1.5">01 — Fleet</p>
           <h1 className="display text-[28px] font-semibold">Devices</h1>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={refresh}
-          disabled={loading}
-        >
-          <RefreshCw size={13} className={cn(loading && "animate-spin")} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setAdding((v) => !v)}
+          >
+            {adding ? <X size={13} /> : <Plus size={13} />}
+            {adding ? "Cancel" : "Add device"}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={refresh}
+            disabled={loading}
+          >
+            <RefreshCw size={13} className={cn(loading && "animate-spin")} />
+            Refresh
+          </Button>
+        </div>
       </div>
+
+      {adding && (
+        <AddDeviceForm
+          onCancel={() => setAdding(false)}
+          onAdded={() => {
+            setAdding(false);
+            refresh();
+          }}
+          onError={(msg) => setError(msg)}
+        />
+      )}
 
       {/* Stats strip */}
       <div className="mb-4 grid grid-cols-3 gap-3">
@@ -176,6 +198,87 @@ export default function DevicesPage() {
         )}
       </Card>
     </div>
+  );
+}
+
+function AddDeviceForm({
+  onCancel,
+  onAdded,
+  onError,
+}: {
+  onCancel: () => void;
+  onAdded: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [id, setId] = useState("");
+  const [alias, setAlias] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!id.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/devices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id.trim(), alias: alias.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      onAdded();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="mb-4">
+      <form
+        onSubmit={submit}
+        className="flex items-end gap-3 px-4 py-3"
+      >
+        <div className="flex-1">
+          <label className="mb-1 block text-[11px] uppercase tracking-wider text-fg-subtle">
+            Device ID (Nomix)
+          </label>
+          <Input
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+            placeholder="e.g. iphone-x-slot-1"
+            required
+            autoFocus
+            className="h-8 text-[12px]"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="mb-1 block text-[11px] uppercase tracking-wider text-fg-subtle">
+            Alias (optional)
+          </label>
+          <Input
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+            placeholder="e.g. Lab phone 1"
+            className="h-8 text-[12px]"
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button type="submit" size="sm" disabled={saving || !id.trim()}>
+            {saving ? "Adding…" : "Add"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onCancel}
+          >
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 }
 

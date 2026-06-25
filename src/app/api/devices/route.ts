@@ -71,3 +71,48 @@ export async function GET() {
 
   return NextResponse.json({ devices: merged, stale: false });
 }
+
+/**
+ * POST /api/devices
+ *
+ * Manually register a device by its Nomix ID. Useful when the dongle isn't
+ * yet reporting to the Nomix API but we already know the device_id and want
+ * to attach accounts / warmup jobs to it. Upserts so the call is idempotent.
+ */
+export async function POST(req: Request) {
+  const supabase = await createClient();
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
+  }
+
+  const { id, alias } = (body ?? {}) as {
+    id?: unknown;
+    alias?: unknown;
+  };
+  if (typeof id !== "string" || id.trim().length === 0) {
+    return NextResponse.json(
+      { error: "id is required (string)" },
+      { status: 400 }
+    );
+  }
+
+  const aliasValue =
+    typeof alias === "string" && alias.trim().length > 0 ? alias.trim() : null;
+
+  const { data, error } = await supabase
+    .from("devices")
+    .upsert(
+      { id: id.trim(), alias: aliasValue },
+      { onConflict: "id" }
+    )
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ device: data }, { status: 201 });
+}
