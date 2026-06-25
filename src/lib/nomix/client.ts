@@ -119,11 +119,15 @@ export class NomixClient implements INomixClient {
     end: Coords,
     options: { isPressed?: boolean; duration?: number } = {}
   ): Promise<ApiResult> {
+    const [startX, startY] = start;
+    const [endX, endY] = end;
     return this.req<ApiResult>(`/${deviceId}/move`, {
       method: "POST",
       body: JSON.stringify({
-        start,
-        end,
+        start_left: startX,
+        start_top: startY,
+        end_left: endX,
+        end_top: endY,
         is_pressed: options.isPressed ?? false,
         duration: options.duration ?? 300,
       }),
@@ -150,7 +154,13 @@ export class NomixClient implements INomixClient {
   ): Promise<ApiResult> {
     return this.req<ApiResult>(`/${deviceId}/scroll`, {
       method: "POST",
-      body: JSON.stringify({ x, y, direction, distance, duration }),
+      body: JSON.stringify({
+        left: x,
+        top: y,
+        direction,
+        distance,
+        duration,
+      }),
     });
   }
 
