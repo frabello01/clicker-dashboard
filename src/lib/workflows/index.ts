@@ -58,13 +58,42 @@ export async function runJobTick(
       const payload = job.payload as WarmupPayload;
       const state = job.state as Partial<WarmupState> | null;
 
-      const result = await tickWarmup(
-        client,
-        job.device_id,
-        state,
-        payload,
-        deadlineMs
-      );
+      let result: Awaited<ReturnType<typeof tickWarmup>>;
+      try {
+        result = await tickWarmup(
+          client,
+          job.device_id,
+          state,
+          payload,
+          deadlineMs
+        );
+      } catch (e) {
+        // Exception inside the tick — most often a Nomix HTTP error or a
+        // Vercel max-duration hit. Persist the error so the row doesn't
+        // sit at status='running' forever and the next claim cycle has
+        // visibility into what's wrong.
+        const message = e instanceof Error ? e.message : String(e);
+        const nextState = (state ?? {}) as WarmupState;
+        if (job.attempts >= MAX_ATTEMPTS) {
+          await failJob(job.id, nextState, `tick threw: ${message}`);
+          return {
+            jobId: job.id,
+            kind: job.kind,
+            done: false,
+            error: message,
+          };
+        }
+        await persistJob(job.id, nextState, {
+          nextRunInSeconds: ERROR_RETRY_DELAY_SECONDS,
+          error: `tick threw: ${message}`,
+        });
+        return {
+          jobId: job.id,
+          kind: job.kind,
+          done: false,
+          error: message,
+        };
+      }
 
       if (result.done) {
         await finishJob(job.id, result.state);
