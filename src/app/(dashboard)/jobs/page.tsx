@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
+import { RefreshCw, ChevronDown, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody } from "@/components/ui/card";
@@ -77,6 +77,23 @@ export default function JobsPage() {
     }
   }, []);
 
+  async function cancelJob(id: string) {
+    if (!confirm("Cancel this job? Any in-flight tick on the phone will finish, but no new ticks will run.")) return;
+    try {
+      const res = await fetch(`/api/jobs/${id}/cancel`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      // Optimistic update so the UI feels instant; next auto-refresh confirms.
+      setJobs((prev) =>
+        prev.map((j) =>
+          j.id === id ? { ...j, status: "cancelled", next_run_at: null } : j
+        )
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -135,7 +152,7 @@ export default function JobsPage() {
       )}
 
       <Card>
-        <div className="grid grid-cols-[20px_minmax(140px,1fr)_minmax(120px,1fr)_minmax(160px,1.4fr)_90px_120px_110px] items-center gap-3 border-b border-border bg-bg-surface-2 px-4 py-2.5 text-[11px] uppercase tracking-wider text-fg-subtle">
+        <div className="grid grid-cols-[20px_minmax(140px,1fr)_minmax(120px,1fr)_minmax(160px,1.4fr)_90px_120px_110px_36px] items-center gap-3 border-b border-border bg-bg-surface-2 px-4 py-2.5 text-[11px] uppercase tracking-wider text-fg-subtle">
           <div />
           <div>Kind</div>
           <div>Device</div>
@@ -143,6 +160,7 @@ export default function JobsPage() {
           <div>Attempts</div>
           <div>Next run</div>
           <div className="text-right">Status</div>
+          <div />
         </div>
 
         {loading && jobs.length === 0 ? (
@@ -168,6 +186,7 @@ export default function JobsPage() {
                 job={j}
                 expanded={expanded === j.id}
                 onToggle={() => setExpanded(expanded === j.id ? null : j.id)}
+                onCancel={() => cancelJob(j.id)}
               />
             ))}
           </ul>
@@ -181,10 +200,12 @@ function JobRow({
   job,
   expanded,
   onToggle,
+  onCancel,
 }: {
   job: Job;
   expanded: boolean;
   onToggle: () => void;
+  onCancel: () => void;
 }) {
   const state = job.state as {
     phase?: string;
@@ -192,21 +213,28 @@ function JobRow({
     likes?: number;
     comments?: number;
   };
+  const isActive = job.status === "pending" || job.status === "running";
 
   return (
     <li className="border-b border-border-subtle last:border-0">
-      <button
-        onClick={onToggle}
-        className="grid w-full grid-cols-[20px_minmax(140px,1fr)_minmax(120px,1fr)_minmax(160px,1.4fr)_90px_120px_110px] items-center gap-3 px-4 py-2.5 text-left hover:bg-bg-surface-2/40"
-      >
-        <div className="text-fg-subtle">
+      <div className="grid w-full grid-cols-[20px_minmax(140px,1fr)_minmax(120px,1fr)_minmax(160px,1.4fr)_90px_120px_110px_36px] items-center gap-3 px-4 py-2.5 hover:bg-bg-surface-2/40">
+        <button
+          onClick={onToggle}
+          className="text-fg-subtle"
+          title={expanded ? "Collapse" : "Expand"}
+        >
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </div>
-        <div className="text-[12px] text-fg">{job.kind}</div>
-        <div className="truncate font-mono text-[11px] text-fg-muted">
+        </button>
+        <button onClick={onToggle} className="text-left text-[12px] text-fg">
+          {job.kind}
+        </button>
+        <button
+          onClick={onToggle}
+          className="truncate text-left font-mono text-[11px] text-fg-muted"
+        >
           {job.device_id ?? "—"}
-        </div>
-        <div className="text-[12px] text-fg-muted">
+        </button>
+        <button onClick={onToggle} className="text-left text-[12px] text-fg-muted">
           {state.phase ? (
             <>
               <span className="text-fg">{state.phase}</span>
@@ -219,15 +247,31 @@ function JobRow({
           ) : (
             <span className="text-fg-subtle">—</span>
           )}
-        </div>
-        <div className="text-[12px] text-fg-muted">{job.attempts}</div>
-        <div className="text-[12px] text-fg-muted">
+        </button>
+        <button onClick={onToggle} className="text-left text-[12px] text-fg-muted">
+          {job.attempts}
+        </button>
+        <button onClick={onToggle} className="text-left text-[12px] text-fg-muted">
           {relativeTime(job.next_run_at)}
-        </div>
+        </button>
         <div className="flex justify-end">
           <Badge tone={statusTone(job.status)}>{job.status}</Badge>
         </div>
-      </button>
+        <div className="flex justify-end">
+          {isActive ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onCancel();
+              }}
+              className="rounded p-1 text-fg-subtle transition-colors hover:bg-status-error/10 hover:text-status-error"
+              title="Cancel job"
+            >
+              <X size={13} />
+            </button>
+          ) : null}
+        </div>
+      </div>
 
       {expanded && (
         <div className="border-t border-border-subtle bg-bg-surface-2/40 px-4 py-3">
