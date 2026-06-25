@@ -44,21 +44,31 @@ export async function GET() {
   }
 
   const localById = new Map((localRows ?? []).map((r) => [r.id as string, r]));
-  const merged = remoteRes.devices!.map((d) => {
-    const local = localById.get(d.id);
+  const remoteById = new Map(remoteRes.devices!.map((d) => [d.id, d]));
+  // Union of both sources — locally-added devices that Nomix doesn't (yet)
+  // know about still appear in the UI, marked offline.
+  const allIds = new Set<string>([
+    ...remoteById.keys(),
+    ...localById.keys(),
+  ]);
+  const merged = [...allIds].map((id) => {
+    const remote = remoteById.get(id);
+    const local = localById.get(id);
     return {
-      id: d.id,
-      alias: local?.alias ?? d.alias ?? null,
-      online: d.online,
-      last_seen: d.last_seen ?? local?.last_seen ?? null,
+      id,
+      alias: local?.alias ?? remote?.alias ?? null,
+      online: remote?.online ?? false,
+      last_seen: remote?.last_seen ?? local?.last_seen ?? null,
       notes: local?.notes ?? null,
     };
   });
 
-  // Upsert remote devices into the local cache (best-effort, fire-and-forget).
-  if (merged.length > 0) {
+  // Upsert remote devices into the local cache so the offline-fallback path
+  // can render them later. Skip the local-only rows — they're already there.
+  const remoteOnly = merged.filter((d) => remoteById.has(d.id));
+  if (remoteOnly.length > 0) {
     await supabase.from("devices").upsert(
-      merged.map((d) => ({
+      remoteOnly.map((d) => ({
         id: d.id,
         alias: d.alias,
         online: d.online,
