@@ -40,14 +40,19 @@ export async function findAndClick(
 }
 
 /**
- * Open an app via iOS Spotlight search. Retries up to `retries` times.
- * Returns the post-launch screen on success, null on failure.
+ * Open an app via iOS Spotlight search.
+ *
+ * Returns the post-launch screen on success, null on failure. NOTE:
+ * defaults to a SINGLE attempt with no `closeApp` cleanup — when called
+ * from a chunked workflow under cron, the next tick is the natural retry.
+ * Multi-retry internally easily blows the Vercel 60s function budget
+ * (each iteration is ~20-25s + closeApp recovery is ~13s).
  */
 export async function openApp(
   client: INomixClient,
   deviceId: string,
   appName: string,
-  { retries = 3 }: { retries?: number } = {}
+  { retries = 1 }: { retries?: number } = {}
 ): Promise<Screen | null> {
   for (let attempt = 1; attempt <= retries; attempt++) {
     // Swipe down from middle-upper area to invoke Spotlight
@@ -59,7 +64,6 @@ export async function openApp(
 
     const search = await parseScreen(client, deviceId);
     if (!search || !(await search.findAndClick(client, deviceId, appName))) {
-      await closeApp(client, deviceId);
       continue;
     }
 
@@ -71,7 +75,6 @@ export async function openApp(
     ) {
       return opened;
     }
-    await closeApp(client, deviceId);
   }
   return null;
 }
