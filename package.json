@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "worker": "tsx scripts/worker.ts"
+    "worker": "tsx --env-file=.env scripts/worker.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
