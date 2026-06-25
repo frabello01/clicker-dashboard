@@ -31,13 +31,18 @@ export interface INomixClient {
 
   // Low-level input (1:1 with REST)
   clickAt(deviceId: string, duration?: number): Promise<ApiResult>;
+  tap(
+    deviceId: string,
+    coords: Coords,
+    duration?: number
+  ): Promise<ApiResult>;
   move(
     deviceId: string,
     start: Coords,
     end: Coords,
     options?: { isPressed?: boolean; duration?: number }
   ): Promise<ApiResult>;
-  type(deviceId: string, text: string): Promise<ApiResult>;
+  type(deviceId: string, text: string, delayMs?: number): Promise<ApiResult>;
   scroll(
     deviceId: string,
     x: number,
@@ -113,6 +118,18 @@ export class NomixClient implements INomixClient {
     });
   }
 
+  /**
+   * Atomic single tap at HID coords — preferred over move+click for taps:
+   * one API round-trip instead of two, and doesn't depend on cursor state.
+   */
+  tap(deviceId: string, coords: Coords, duration = 100): Promise<ApiResult> {
+    const [left, top] = coords;
+    return this.req<ApiResult>(`/${deviceId}/tap`, {
+      method: "POST",
+      body: JSON.stringify({ left, top, duration }),
+    });
+  }
+
   move(
     deviceId: string,
     start: Coords,
@@ -134,13 +151,15 @@ export class NomixClient implements INomixClient {
     });
   }
 
-  type(deviceId: string, text: string): Promise<ApiResult> {
-    if (text.length > 10000) {
-      throw new Error("Nomix type(): text exceeds 10000 character limit");
+  type(deviceId: string, text: string, delayMs = 0): Promise<ApiResult> {
+    if (text.length === 0 || text.length > 10000) {
+      throw new Error(
+        "Nomix type(): text length must be 1..10000 chars (per spec)"
+      );
     }
     return this.req<ApiResult>(`/${deviceId}/keyboard/type`, {
       method: "POST",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, delay: delayMs }),
     });
   }
 
@@ -173,12 +192,11 @@ export class NomixClient implements INomixClient {
   // ----- High-level helpers -----
 
   /**
-   * Tap at the given HID coordinates. Internally does a move-to + click.
-   * `duration` is the hold time in ms.
+   * Tap at the given HID coordinates. Uses the dedicated `/tap` endpoint
+   * (one API call, atomic). `duration` is the hold time in ms.
    */
   async click(deviceId: string, coords: Coords, duration = 100): Promise<void> {
-    await this.move(deviceId, coords, coords);
-    await this.clickAt(deviceId, duration);
+    await this.tap(deviceId, coords, duration);
   }
 
   /**

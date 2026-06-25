@@ -59,7 +59,9 @@ const AD_KEYWORDS = [
 /** Heuristic ad detection — matches description keywords or an "ad" badge. */
 export function isAd(screen: Screen): boolean {
   if (screen.contains([...AD_KEYWORDS])) return true;
-  return screen.elements.some((el) => el.content.toLowerCase() === "ad");
+  return screen.elements.some(
+    (el) => el.content !== null && el.content.toLowerCase() === "ad"
+  );
 }
 
 // ---------------- Probabilistic actions ----------------

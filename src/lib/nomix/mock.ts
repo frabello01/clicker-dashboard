@@ -101,6 +101,12 @@ export class MockNomixClient implements INomixClient {
     return ok();
   }
 
+  async tap(deviceId: string, coords: Coords, duration = 100): Promise<ApiResult> {
+    this.log("tap", { deviceId, coords, duration });
+    await sleep(50);
+    return ok();
+  }
+
   async move(
     deviceId: string,
     start: Coords,
@@ -112,8 +118,12 @@ export class MockNomixClient implements INomixClient {
     return ok();
   }
 
-  async type(deviceId: string, text: string): Promise<ApiResult> {
-    this.log("type", { deviceId, length: text.length });
+  async type(
+    deviceId: string,
+    text: string,
+    delayMs = 0
+  ): Promise<ApiResult> {
+    this.log("type", { deviceId, length: text.length, delayMs });
     await sleep(text.length * 5);
     return ok();
   }
@@ -138,8 +148,7 @@ export class MockNomixClient implements INomixClient {
   }
 
   async click(deviceId: string, coords: Coords, duration = 100): Promise<void> {
-    await this.move(deviceId, coords, coords);
-    await this.clickAt(deviceId, duration);
+    await this.tap(deviceId, coords, duration);
   }
 
   async swipe(

@@ -54,11 +54,14 @@ export type LocationZone =
  * One UI element parsed from a screen by the vision API.
  * `bbox` is [y_min, x_min, y_max, x_max] in HID coords (their convention).
  * `center` is (x, y) in HID coords.
+ *
+ * Per the official OpenAPI spec, `content` is nullable — handle accordingly
+ * in any find/match logic to avoid NPE on .toLowerCase().
  */
 export type ScreenElement = {
   idx: number;
   type: ElementType;
-  content: string;
+  content: string | null;
   interactivity: boolean;
   center: Coords;
   bbox: [number, number, number, number];
@@ -72,7 +75,8 @@ export type ScreenState = {
   latency: number;
 };
 
-export type ScrollDirection = "up" | "down" | "left" | "right";
+/** Per official spec: only vertical scrolling is supported. */
+export type ScrollDirection = "up" | "down";
 
 export type SwipeOptions = {
   up?: number;

@@ -40,6 +40,7 @@ export class Screen {
     const interactiveOnly = opts.interactiveOnly ?? true;
     for (const kw of kws) {
       for (const el of this.state.elements) {
+        if (!el.content) continue;
         if (!el.content.toLowerCase().includes(kw)) continue;
         if (interactiveOnly && !el.interactivity) continue;
         return el.center;
@@ -69,7 +70,11 @@ export class Screen {
     const desc = this.state.description.toLowerCase();
     for (const kw of kws) {
       if (desc.includes(kw)) return true;
-      if (this.state.elements.some((e) => e.content.toLowerCase().includes(kw)))
+      if (
+        this.state.elements.some(
+          (e) => e.content && e.content.toLowerCase().includes(kw)
+        )
+      )
         return true;
     }
     return false;
