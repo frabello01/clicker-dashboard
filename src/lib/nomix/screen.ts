@@ -17,7 +17,7 @@ export class Screen {
     return this.state.app_name;
   }
   get description(): string {
-    return this.state.description;
+    return this.state.screen_description ?? "";
   }
   get elements(): ScreenElement[] {
     return this.state.elements;
@@ -67,7 +67,7 @@ export class Screen {
     const kws = (Array.isArray(keywords) ? keywords : [keywords]).map((k) =>
       k.toLowerCase()
     );
-    const desc = this.state.description.toLowerCase();
+    const desc = (this.state.screen_description ?? "").toLowerCase();
     for (const kw of kws) {
       if (desc.includes(kw)) return true;
       if (

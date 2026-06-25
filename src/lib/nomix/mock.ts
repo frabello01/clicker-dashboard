@@ -25,7 +25,7 @@ const MOCK_DEVICE_CONNECTED: Record<string, boolean> = {
 
 const MOCK_REELS_SCREEN: ScreenState = {
   app_name: "Instagram",
-  description:
+  screen_description:
     "Instagram Reels feed. A short video is playing, with like/comment/share buttons on the right edge.",
   latency: 1.2,
   elements: [

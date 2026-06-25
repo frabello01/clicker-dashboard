@@ -68,9 +68,15 @@ export type ScreenElement = {
   location: LocationZone;
 };
 
+/**
+ * Raw response from POST /{id}/screen-state. The JSON key for the
+ * description is `screen_description` per the official OpenAPI spec —
+ * don't rename it here. The `Screen` wrapper exposes a friendlier
+ * `description` getter on top.
+ */
 export type ScreenState = {
   app_name: string;
-  description: string;
+  screen_description: string;
   elements: ScreenElement[];
   latency: number;
 };
