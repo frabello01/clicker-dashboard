@@ -13,12 +13,12 @@ import { env } from "@/lib/env";
 import { claimNextJob } from "@/lib/workflows/queue";
 import { runJobTick } from "@/lib/workflows";
 
-// Cap at 60s (Vercel Pro plan limit). Leave 10s headroom inside tickWarmup
-// via DEADLINE_MARGIN_MS so the function returns cleanly.
+// Cap at 60s (Vercel Pro limit). Use 55s of it; the 5s buffer covers DB
+// persist + JSON encode after tickWarmup returns.
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-const TICK_BUDGET_MS = 50_000;
+const TICK_BUDGET_MS = 55_000;
 
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization");

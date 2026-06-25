@@ -92,8 +92,10 @@ const NEW_STATE: WarmupState = {
   comments: 0,
 };
 
-/** Safety margin: stop the scrolling loop this many ms before deadline. */
-const DEADLINE_MARGIN_MS = 15_000;
+/** Safety margin: stop the scrolling loop this many ms before deadline.
+ *  Reduced from 15s — most scroll cycles are 5-15s; 10s buffer is enough
+ *  to let the in-flight cycle finish and the dispatcher persist state. */
+const DEADLINE_MARGIN_MS = 10_000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -141,14 +143,15 @@ export async function tickWarmup(
       return { state, done: false, error: "openApp(instagram) failed" };
     }
     seedScreen = opened;
+    // Give Instagram a moment to finish rendering the bottom nav before we
+    // try to find the Reels tab in the next phase.
+    await sleep(2500);
     state.phase = "open_reels";
   }
 
   if (state.phase === "open_reels") {
-    if (Date.now() > deadlineMs - DEADLINE_MARGIN_MS) {
-      // Out of budget — save progress, next tick picks up open_reels.
-      return { state, done: false };
-    }
+    // No deadline gate here — let openReels run; if Vercel kills the function
+    // the next tick simply resumes at phase=open_reels.
     const ok = await openReels(client, deviceId, seedScreen ?? undefined);
     if (!ok) {
       return { state, done: false, error: "openReels failed" };

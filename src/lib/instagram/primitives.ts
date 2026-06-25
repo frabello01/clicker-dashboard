@@ -160,27 +160,44 @@ export async function postComment(
 /**
  * Navigate to the Reels tab inside Instagram.
  *
- * Single attempt: find the Reels tab/button in the bottom nav, tap it, verify
- * we landed somewhere whose description mentions "reel". No retry loop — the
- * cron is the retry. No fallback center-tap on failure (was opening random
- * things). Pass `initialScreen` from openApp to skip an extra parseScreen.
+ * Up to 3 internal attempts (each ~10s) because Instagram often shows a
+ * splash/loading state right after launch where the Reels tab isn't yet
+ * tappable. Cheap to retry — no closeApp / no center-tap fallback. Pass
+ * `initialScreen` from openApp to skip the first parseScreen.
  */
 export async function openReels(
   client: INomixClient,
   deviceId: string,
   initialScreen?: Screen
 ): Promise<boolean> {
-  const seed = initialScreen ?? (await parseScreen(client, deviceId));
-  if (!seed) return false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    // First attempt may reuse the seed from openApp; subsequent attempts
+    // must re-parse because Instagram has had time to finish loading.
+    const screen =
+      attempt === 1 && initialScreen
+        ? initialScreen
+        : await parseScreen(client, deviceId);
+    if (!screen) {
+      await sleep(1500);
+      continue;
+    }
 
-  // Restrict to tab/button/icon — never an image or random text element.
-  const tapped = await seed.findAndClick(client, deviceId, "reels", {
-    types: ["tab", "button", "icon"],
-  });
-  if (!tapped) return false;
+    // Restrict to tab/button/icon — never an image or random text element.
+    const tapped = await screen.findAndClick(client, deviceId, "reels", {
+      types: ["tab", "button", "icon"],
+    });
+    if (!tapped) {
+      // Likely Instagram is still loading (no nav bar visible yet). Wait and retry.
+      await sleep(2000);
+      continue;
+    }
 
-  await sleep(1500);
-  const check = await parseScreen(client, deviceId);
-  if (!check) return false;
-  return check.description.toLowerCase().includes("reel");
+    await sleep(2000);
+    const check = await parseScreen(client, deviceId);
+    if (check && check.description.toLowerCase().includes("reel")) {
+      return true;
+    }
+    // Tap landed but we're not in Reels — could be a transient render. Retry.
+  }
+  return false;
 }
