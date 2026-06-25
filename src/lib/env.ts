@@ -23,7 +23,7 @@ export const env = {
     return required("NEXT_PUBLIC_SUPABASE_ANON_KEY");
   },
   get supabaseServiceRoleKey() {
-    return optional("SUPABASE_SERVICE_ROLE_KEY");
+    return required("SUPABASE_SERVICE_ROLE_KEY");
   },
 
   // Nomix
@@ -35,6 +35,11 @@ export const env = {
   },
   get nomixUseMock() {
     return optional("NOMIX_USE_MOCK", "false") === "true";
+  },
+
+  // Cron
+  get cronSecret() {
+    return required("CRON_SECRET");
   },
 };
 
