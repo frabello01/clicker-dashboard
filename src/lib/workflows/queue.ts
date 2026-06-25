@@ -99,6 +99,19 @@ export async function finishJob(
   if (error) throw error;
 }
 
+/** Re-fetch the latest row for a job (used by the long-running worker to
+ *  observe state changes from external sources, e.g. user cancellation). */
+export async function getJob(jobId: string): Promise<Job | null> {
+  const supabase = adminClient();
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("*")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Job | null) ?? null;
+}
+
 /** Mark a job permanently failed. */
 export async function failJob(
   jobId: string,
