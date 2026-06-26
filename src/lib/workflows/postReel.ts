@@ -150,87 +150,73 @@ export async function tickPostReel(
 const UPLOAD_CHANNEL_NAME = "creator advisor";
 
 /**
- * Open the Telegram native app via the iOS App Library.
+ * Open an iOS app via Spotlight in a SINGLE vision call.
  *
- * App Library is iOS' organized view of ALL installed apps, reached by
- * swiping right past the last home page. Critically:
- *   - It contains ONLY iOS-installed apps (no Chrome bookmarks, no Safari
- *     suggestions, no Spotlight "Suggerimenti").
- *   - Its built-in search returns a clean list of matching apps.
+ * Algorithm:
+ *   1. Open Spotlight (Cerca button), clear, type the app name.
+ *   2. parseScreen ONCE.
+ *   3. Find the "Applicazioni" / "Applications" section header — iOS Spotlight
+ *      always renders this above its native-app results.
+ *   4. Pick the topmost icon BELOW that header whose content matches the app
+ *      name and looks like a native-app label (i.e. NOT a Chrome/Safari
+ *      bookmark with .org / .com / "page" / "web" markers).
+ *   5. Tap it. No verify — single round trip.
  *
- * Generic algorithm — works for any app on any iPhone regardless of where
- * the user has placed icons:
- *   1. goHome (known state)
- *   2. Swipe to next page, parseScreen; repeat until app_name detects
- *      "App Library" (max 10 attempts, defensive).
- *   3. Tap the App Library search field (structural: the only `input`).
- *   4. Clear keyboard + type the app name.
- *   5. Tap the first matching app icon in the results.
- *   6. Verify we landed in the target app.
+ * Generic: works for any app name on any iPhone. The header-anchored search
+ * skips Spotlight's "Suggerimenti" / "Siti web" sections which surface
+ * browser bookmarks (the Telegram-via-Chrome bug we hit).
  */
 async function openTelegramViaAppLibrary(
   client: INomixClient,
   deviceId: string
 ): Promise<boolean> {
-  // 1. Known start state
   await goHome(client, deviceId);
   await sleep(1500);
 
-  // 2. Navigate to App Library by swiping left until app_name confirms
-  //    we're there. This auto-adapts to any number of home pages.
-  let reachedAppLibrary = false;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    await client.swipe(deviceId, [28000, 16000], {
-      left: 24000,
-      duration: 200,
-    });
-    await sleep(900);
-    const state = await parseScreen(client, deviceId);
-    if (!state) continue;
-    if (/app library|libreria app/i.test(state.appName)) {
-      reachedAppLibrary = true;
-      break;
-    }
-  }
-  if (!reachedAppLibrary) return false;
-
-  // 3. App Library's search bar is the only input on this screen.
-  const lib = await parseScreen(client, deviceId);
-  if (!lib) return false;
-  const searchInput = lib.elements.find(
-    (el) => el.type === "input" && el.interactivity
-  );
-  if (!searchInput) return false;
-  await client.click(deviceId, searchInput.center);
+  await client.click(deviceId, [16366, 27245]); // Cerca
   await sleep(1500);
-
-  // 4. Clear + type
-  for (let j = 0; j < 30; j++) await client.combo(deviceId, ["Backspace"]);
+  for (let i = 0; i < 30; i++) await client.combo(deviceId, ["Backspace"]);
   await client.type(deviceId, "telegram");
   await sleep(2000);
 
-  // 5. Pick first matching app — App Library search only returns iOS apps,
-  //    so any "telegram" match is the right one. We still exclude the search
-  //    input itself (its content will contain "telegram" because we typed it).
-  const results = await parseScreen(client, deviceId);
-  if (!results) return false;
-  const tgIcon = results.elements
+  const screen = await parseScreen(client, deviceId);
+  if (!screen) return false;
+
+  // Find the "Applicazioni" / "Applications" section header to anchor on
+  // the native-app block.
+  const appsHeader = screen.elements.find(
+    (el) =>
+      el.content !== null &&
+      /^applic(ation|azion)/i.test(el.content.trim())
+  );
+
+  // Candidate icons matching "telegram", sorted by y.
+  let candidates = screen.elements
     .filter(
       (el) =>
         el.interactivity &&
         el.type !== "input" &&
         el.content !== null &&
-        /telegram/i.test(el.content)
+        /telegram/i.test(el.content) &&
+        // Exclude obvious browser bookmarks / web results
+        !/(chrome|safari|edge|firefox|brave|page|bookmark|url|web|\.org|\.com|http)/i.test(
+          el.content
+        )
     )
-    .sort((a, b) => a.center[1] - b.center[1])[0];
-  if (!tgIcon) return false;
-  await client.click(deviceId, tgIcon.center);
-  await sleep(5000);
+    .sort((a, b) => a.center[1] - b.center[1]);
 
-  // 6. Verify the launch landed in Telegram (defensive — should always be true
-  //    given App Library contains only apps, but keeps the contract clear).
-  const after = await parseScreen(client, deviceId);
-  return /telegram/i.test(after?.appName ?? "");
+  // If we found the section header, only consider icons BELOW it.
+  if (appsHeader) {
+    const belowHeader = candidates.filter(
+      (c) => c.center[1] > appsHeader.center[1]
+    );
+    if (belowHeader.length > 0) candidates = belowHeader;
+  }
+
+  if (candidates.length === 0) return false;
+  await client.click(deviceId, candidates[0].center);
+  await sleep(5000);
+  return true;
 }
 
 async function saveVideoFromTelegram(
