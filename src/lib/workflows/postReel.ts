@@ -16,7 +16,6 @@ import {
   closeApp,
   goHome,
   openApp,
-  randomSleep,
 } from "@/lib/nomix/actions";
 import { parseScreen, Screen } from "@/lib/nomix/screen";
 
@@ -136,60 +135,86 @@ export async function tickPostReel(
 
 // ---------------- Phase implementations ----------------
 
+/**
+ * Saves the latest video from the Telegram upload channel into iOS Photos.
+ *
+ * Built with HARDCODED COORDINATES captured from an iPhone 15 Pro (iOS Italian)
+ * to minimize parseScreen calls — Nomix vision has a ~30s cooldown per call,
+ * so a 5-vision workflow costs 2-3 minutes. We use vision only at TWO
+ * decision points: finding the Telegram icon in Spotlight (Spotlight order
+ * varies) and finding the latest video in the chat (position depends on
+ * message count).
+ */
 async function saveVideoFromTelegram(
   client: INomixClient,
   deviceId: string,
-  payload: PostReelPayload
+  _payload: PostReelPayload
 ): Promise<boolean> {
-  const tg = await openApp(client, deviceId, "telegram");
-  if (!tg) return false;
+  // 1. Make sure we're on Home Screen
+  await goHome(client, deviceId);
   await sleep(1500);
 
-  // Open the upload channel — its title is unknown at code time, but it's the
-  // chat that recently received the document. Fall back to the most recent
-  // chat in the list (top of chats screen).
-  const chats = await parseScreen(client, deviceId);
-  if (!chats) return false;
-  // Look for the channel by partial name match or first chat row.
-  const channel =
-    chats.find(["creator advisor", "upload"], { types: ["button", "icon", "text"] }) ??
-    chats.elements.find((el) => el.type === "button" && el.interactivity)?.center;
-  if (!channel) return false;
-  await client.click(deviceId, channel);
-  await randomSleep(1.5, 2.5);
+  // 2. Open Spotlight via the "Cerca" button at the bottom of home screen
+  await client.click(deviceId, [16366, 27245]);
+  await sleep(1500);
 
-  // Inside the chat, find the latest document — usually at the bottom of the
-  // scrollable area. Match by file_name (Telegram shows it on each document row).
-  const inChat = await parseScreen(client, deviceId);
-  if (!inChat) return false;
-  // Prefer an element whose content includes the filename; else any "document"-like icon.
-  const doc =
-    inChat.find(payload.file_name) ??
-    inChat.find([".mp4", ".mov"], { interactiveOnly: false });
-  if (!doc) return false;
-  await client.click(deviceId, doc);
-  await randomSleep(2.0, 3.0);
+  // 3. Clear any leftover query, then type "telegram"
+  for (let i = 0; i < 30; i++) await client.combo(deviceId, ["Backspace"]);
+  await client.type(deviceId, "telegram");
+  await sleep(2000);
 
-  // Telegram opens the file preview. Find the iOS share button (3-dots /
-  // share icon top-right), then "Save Video" / "Save to Photos".
-  const previewScreen = await parseScreen(client, deviceId);
-  if (!previewScreen) return false;
-  const shareBtn = previewScreen.find(["share", "more options", "actions"], {
-    types: ["button", "icon"],
+  // 4. VISION: find the Telegram app icon (position in Spotlight varies)
+  const spotlight = await parseScreen(client, deviceId);
+  if (!spotlight) return false;
+  const tgIcon = spotlight.elements.find(
+    (el) =>
+      el.type === "icon" &&
+      el.interactivity &&
+      el.content !== null &&
+      /^telegram\b/i.test(el.content)
+  );
+  if (!tgIcon) return false;
+  await client.click(deviceId, tgIcon.center);
+  await sleep(5000); // Telegram cold launch
+
+  // 5. Tap the "Creator Advisor Upload Bot" channel row (top of chat list)
+  await client.click(deviceId, [15564, 7437]);
+  await sleep(4000);
+
+  // 6. VISION: find the most recent video in the chat (bottom-most file)
+  const chat = await parseScreen(client, deviceId);
+  if (!chat) return false;
+  const videos = chat.elements.filter(
+    (el) =>
+      el.interactivity &&
+      el.content !== null &&
+      /\.(mov|mp4|m4v)\b/i.test(el.content)
+  );
+  if (videos.length === 0) return false;
+  const latest = videos.sort((a, b) => b.center[1] - a.center[1])[0];
+  await client.click(deviceId, latest.center);
+  await sleep(4500); // iOS opens the file in Photos/Files preview
+
+  // 7. Tap the iOS share button (bottom-left of preview)
+  await client.click(deviceId, [2588, 30505]);
+  await sleep(3000); // share sheet animation
+
+  // 8. Scroll the share-sheet actions list up so "Salva video" comes into view.
+  //    Small drag inside the modal — too much would dismiss it or tap an action.
+  await client.swipe(deviceId, [16384, 28000], {
+    up: 7000,
+    duration: 400,
   });
-  if (shareBtn) {
-    await client.click(deviceId, shareBtn);
-    await sleep(1500);
-  }
+  await sleep(1500);
 
-  const shareSheet = await parseScreen(client, deviceId);
-  if (!shareSheet) return false;
-  const saveBtn = shareSheet.find(["save video", "save to photos", "salva video"], {
-    interactiveOnly: false,
-  });
-  if (!saveBtn) return false;
-  await client.click(deviceId, saveBtn);
-  await randomSleep(2.0, 4.0);
+  // 9. Tap "Salva video" — its on-screen y is consistent after the scroll above
+  //    on iPhone 15 Pro. (Captured: 16367, 21380.)
+  await client.click(deviceId, [16367, 21380]);
+  await sleep(5000); // save-to-Photos completion
+
+  // 10. Return to Home Screen so the next phase starts clean.
+  await goHome(client, deviceId);
+  await sleep(1500);
 
   return true;
 }
