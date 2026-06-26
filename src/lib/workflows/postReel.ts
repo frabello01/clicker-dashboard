@@ -219,107 +219,93 @@ async function saveVideoFromTelegram(
   return true;
 }
 
+/**
+ * Open Instagram's reel composer.
+ *
+ * Hardcoded coords captured from iPhone 15 Pro / IT iOS — IG's home-feed
+ * "+" button is top-LEFT (not bottom). After the composer opens, the REEL
+ * mode tab is at the bottom; we tap it and then the gallery preview.
+ *
+ * Coords:
+ *   Add post (+):           (2326, 3194)   — top-left of IG home feed
+ *   REEL mode tab:          (22183, 30702) — bottom of composer
+ *   Gallery preview button: (2768, 30719)  — bottom-left, opens picker
+ */
 async function openReelComposer(
   client: INomixClient,
   deviceId: string
 ): Promise<boolean> {
-  const home = await parseScreen(client, deviceId);
-  if (!home) return false;
-  // The "+" button in the bottom-center nav opens the composer.
-  const plusBtn = home.find(["create", "new post", "compose", "+"], {
-    types: ["button", "icon", "tab"],
-  });
-  if (!plusBtn) return false;
-  await client.click(deviceId, plusBtn);
-  await sleep(2000);
-
-  // Composer choice screen — tap "Reel".
-  const composer = await parseScreen(client, deviceId);
-  if (!composer) return false;
-  const reelTab =
-    composer.find("reel", { types: ["tab", "button"] }) ??
-    composer.find("reels", { types: ["tab", "button"] });
-  if (!reelTab) return false;
-  await client.click(deviceId, reelTab);
-  await sleep(2000);
+  await client.click(deviceId, [2326, 3194]); // Add post
+  await sleep(3000);
+  await client.click(deviceId, [22183, 30702]); // REEL tab
+  await sleep(1500);
+  await client.click(deviceId, [2768, 30719]); // gallery preview
+  await sleep(3500);
   return true;
 }
 
+/**
+ * Pick the most recent video from the gallery picker + advance through
+ * the editor (dismissing the occasional Reels announcement modal) to reach
+ * the caption screen.
+ *
+ * Coords (iPhone 15 Pro / IT iOS, "Recents" album view):
+ *   First/latest video thumb:    (12270, 23117) — top-left of grid (after the Camera button)
+ *   Avanti (gallery → editor):   (29244, 3112)  — top-right
+ *   Reels announcement OK:       (16366, 23083) — modal that sometimes appears
+ *   Avanti (editor → caption):   (27835, 30308) — bottom-right
+ */
 async function pickLatestVideoFromGallery(
   client: INomixClient,
   deviceId: string
 ): Promise<boolean> {
-  // Gallery picker: the most recent item is usually first (top-left). Vision
-  // reports thumbnails as images — pick the first interactive image.
-  const picker = await parseScreen(client, deviceId);
-  if (!picker) return false;
-  const firstThumb = picker.elements.find(
-    (el) => (el.type === "image" || el.type === "button") && el.interactivity
-  );
-  if (!firstThumb) return false;
-  await client.click(deviceId, firstThumb.center);
-  await sleep(2000);
-
-  // Tap "Next" (Avanti) to advance through trimmer / cover screens.
-  for (let i = 0; i < 3; i++) {
-    const screen = await parseScreen(client, deviceId);
-    if (!screen) return false;
-    const next = screen.find(["next", "avanti", "done", "share to"], {
-      types: ["button"],
-    });
-    if (!next) break;
-    await client.click(deviceId, next);
-    await sleep(2500);
-  }
+  await client.click(deviceId, [12270, 23117]); // latest video thumb
+  await sleep(1500);
+  await client.click(deviceId, [29244, 3112]); // Avanti -> editor
+  await sleep(4000);
+  // Reels announcement modal — tap OK if present. The tap is harmless if
+  // the modal isn't there (lands on the editor canvas, ignored).
+  await client.click(deviceId, [16366, 23083]);
+  await sleep(1500);
+  await client.click(deviceId, [27835, 30308]); // Avanti -> caption screen
+  await sleep(4000);
   return true;
 }
 
+/**
+ * Type the caption into the "Aggiungi una didascalia..." input field.
+ * Coord captured for iPhone 15 Pro / IT iOS: (9911, 16317).
+ */
 async function writeCaption(
   client: INomixClient,
   deviceId: string,
   caption: string
 ): Promise<boolean> {
-  if (!caption) return true; // empty caption is allowed
-  const screen = await parseScreen(client, deviceId);
-  if (!screen) return false;
-  const captionField = screen.find(
-    ["write a caption", "scrivi una didascalia", "caption"],
-    { interactiveOnly: false }
-  );
-  if (!captionField) return false;
-  await client.click(deviceId, captionField);
-  await sleep(800);
+  if (!caption) return true;
+  await client.click(deviceId, [9911, 16317]);
+  await sleep(1200);
+  // Clear any leftover text in case IG remembered an old draft
+  for (let i = 0; i < 50; i++) await client.combo(deviceId, ["Backspace"]);
   await client.type(deviceId, caption);
-  await sleep(1000);
+  await sleep(1500);
   return true;
 }
 
+/**
+ * Tap "Condividi" to publish the reel. Coord: (24214, 30145).
+ * IG's upload can take 30-90s; we DON'T poll for "posted" because every
+ * parseScreen costs ~30s of vision latency. Trust the tap; the upload
+ * progresses in background even after we return.
+ */
 async function publishReel(
   client: INomixClient,
   deviceId: string
 ): Promise<boolean> {
-  const screen = await parseScreen(client, deviceId);
-  if (!screen) return false;
-  const shareBtn = screen.find(["share", "publish", "condividi", "pubblica"], {
-    types: ["button"],
-  });
-  if (!shareBtn) return false;
-  await client.click(deviceId, shareBtn);
-
-  // Reel upload can take 30-90s. Poll for "Posted" / progress completion.
-  for (let i = 0; i < 30; i++) {
-    await sleep(3000);
-    const s = await parseScreen(client, deviceId);
-    if (!s) continue;
-    if (
-      s.description.toLowerCase().includes("posted") ||
-      s.description.toLowerCase().includes("pubblicato") ||
-      s.find(["your reel", "il tuo reel", "see reel"])
-    ) {
-      return true;
-    }
-  }
-  // Best-effort timeout — assume success if we got past the share button.
+  await client.click(deviceId, [24214, 30145]);
+  // Give IG a chunk of time to start the upload before we navigate away —
+  // tapping Home while the upload is mid-flight can cancel it on some
+  // builds. 30s is conservative; reduce if confirmed safe.
+  await sleep(30_000);
   return true;
 }
 
