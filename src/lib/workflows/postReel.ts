@@ -167,27 +167,52 @@ async function saveVideoFromTelegram(
   await client.type(deviceId, "telegram");
   await sleep(2000);
 
-  // 4. VISION: find the Telegram NATIVE app icon. Spotlight also surfaces
-  //    Chrome bookmarks like "Telegram icon with Chrome badge" → tap on
-  //    that opens web.telegram.org in Chrome instead of the app. Filter
-  //    those out and prefer an entry explicitly labelled "app".
+  // 4. VISION: find Telegram NATIVE app icon in Spotlight. Spotlight surfaces
+  //    Chrome/Safari bookmarks ("web.telegram.org" etc.) that tap-open in
+  //    the browser. Filter obvious browser-badge labels AND verify after tap.
   const spotlight = await parseScreen(client, deviceId);
   if (!spotlight) return false;
-  const tgCandidates = spotlight.elements.filter(
-    (el) =>
-      el.type === "icon" &&
-      el.interactivity &&
-      el.content !== null &&
-      /telegram/i.test(el.content) &&
-      !/(chrome|safari|web|browser|edge|firefox|brave)/i.test(el.content)
-  );
-  // Prefer the one labelled "app", else the topmost (Spotlight orders apps first).
-  const tgIcon =
-    tgCandidates.find((el) => /\bapp\b/i.test(el.content!)) ??
-    tgCandidates.sort((a, b) => a.center[1] - b.center[1])[0];
-  if (!tgIcon) return false;
-  await client.click(deviceId, tgIcon.center);
-  await sleep(5000); // Telegram cold launch
+  const tgCandidates = spotlight.elements
+    .filter(
+      (el) =>
+        el.type === "icon" &&
+        el.interactivity &&
+        el.content !== null &&
+        /telegram/i.test(el.content) &&
+        !/(chrome|safari|web|browser|edge|firefox|brave|page|bookmark)/i.test(el.content)
+    )
+    // App icons in Spotlight live in the top-most band — sort ascending.
+    .sort((a, b) => a.center[1] - b.center[1]);
+
+  if (tgCandidates.length === 0) return false;
+
+  let landedInTelegram = false;
+  for (let i = 0; i < tgCandidates.length; i++) {
+    const candidate = tgCandidates[i];
+    await client.click(deviceId, candidate.center);
+    await sleep(5000);
+
+    // Verify we landed in Telegram (and not Chrome/Safari opening web.telegram.org)
+    const after = await parseScreen(client, deviceId);
+    const appName = after?.appName.toLowerCase() ?? "";
+    if (appName.includes("telegram") &&
+        !/(chrome|safari|edge|firefox|brave)/i.test(appName)) {
+      landedInTelegram = true;
+      break;
+    }
+
+    // Wrong app — go home, re-invoke Spotlight, try next candidate.
+    if (i === tgCandidates.length - 1) break;
+    await goHome(client, deviceId);
+    await sleep(2000);
+    await client.click(deviceId, [16366, 27245]);
+    await sleep(1500);
+    for (let j = 0; j < 30; j++) await client.combo(deviceId, ["Backspace"]);
+    await client.type(deviceId, "telegram");
+    await sleep(2000);
+  }
+
+  if (!landedInTelegram) return false;
 
   // 5. Navigate to the channel — Telegram remembers the last view (could be
   //    chat list, an open chat, a media preview, etc). Be tolerant.
