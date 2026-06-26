@@ -58,13 +58,16 @@ export async function findAndClick(
 }
 
 /**
- * Open an app via iOS Spotlight search.
+ * Open an app, robust to whatever screen the phone is currently on.
  *
- * Returns the post-launch screen on success, null on failure. NOTE:
- * defaults to a SINGLE attempt with no `closeApp` cleanup — when called
- * from a chunked workflow under cron, the next tick is the natural retry.
- * Multi-retry internally easily blows the Vercel 60s function budget
- * (each iteration is ~20-25s + closeApp recovery is ~13s).
+ * Strategy (in order):
+ *   1. If we're ALREADY in the target app → return the current screen
+ *      (zero-cost resume).
+ *   2. If we're in App Library → use its native search bar (no Spotlight gesture
+ *      needed, more reliable than swipe-down inside that view).
+ *   3. Otherwise → goHome (force Home Screen) then Spotlight + type + tap.
+ *
+ * Returns the post-launch screen on success, null on failure.
  */
 export async function openApp(
   client: INomixClient,
@@ -72,12 +75,30 @@ export async function openApp(
   appName: string,
   { retries = 1 }: { retries?: number } = {}
 ): Promise<Screen | null> {
+  // Pre-check current state — saves a full Spotlight cycle when possible.
+  const current = await parseScreen(client, deviceId);
+  if (
+    current &&
+    current.appName.toLowerCase().includes(appName.toLowerCase())
+  ) {
+    return current;
+  }
+  if (current && current.appName === "App Library") {
+    const viaLibrary = await openViaAppLibrary(
+      client,
+      deviceId,
+      appName,
+      current
+    );
+    if (viaLibrary) return viaLibrary;
+    // Fall through to Spotlight if App Library search failed.
+  }
+
   for (let attempt = 1; attempt <= retries; attempt++) {
-    // Always start from a known state — Home Screen. Otherwise if the phone
-    // is in App Library / another app, the swipe-down won't open Spotlight.
+    // Ensure clean state — Spotlight gesture only behaves consistently from
+    // Home Screen across iOS versions / jailbreak tweaks.
     await goHome(client, deviceId);
 
-    // Swipe down from middle-upper area to invoke Spotlight
     await client.swipe(deviceId, [16000, 10000], { down: 8000, duration: 300 });
     await sleep(500);
 
@@ -86,8 +107,7 @@ export async function openApp(
 
     const search = await parseScreen(client, deviceId);
     if (!search) continue;
-    // Specifically tap an icon/button element — not the search input field
-    // (which also matches the keyword because we just typed it there).
+    // Tap icon/button only — never the input field (which contains our query).
     const tapped = await search.findAndClick(client, deviceId, appName, {
       types: ["icon", "button"],
     });
@@ -101,6 +121,47 @@ export async function openApp(
     ) {
       return opened;
     }
+  }
+  return null;
+}
+
+/**
+ * Launch an app from the iOS App Library screen by using its built-in search
+ * bar at the top. Avoids the unreliable swipe-down-for-Spotlight gesture when
+ * we're already in App Library.
+ */
+async function openViaAppLibrary(
+  client: INomixClient,
+  deviceId: string,
+  appName: string,
+  screen: Screen
+): Promise<Screen | null> {
+  // App Library has exactly one input element (the search bar). Find it
+  // structurally instead of by label, so it works across iOS languages.
+  const searchInput = screen.elements.find(
+    (el) => el.type === "input" && el.interactivity
+  );
+  if (!searchInput) return null;
+
+  await client.click(deviceId, searchInput.center);
+  await sleep(800);
+  await client.type(deviceId, appName);
+  await sleep(1500);
+
+  const results = await parseScreen(client, deviceId);
+  if (!results) return null;
+  const tapped = await results.findAndClick(client, deviceId, appName, {
+    types: ["icon", "button"],
+  });
+  if (!tapped) return null;
+
+  await sleep(3000);
+  const opened = await parseScreen(client, deviceId);
+  if (
+    opened &&
+    opened.appName.toLowerCase().includes(appName.toLowerCase())
+  ) {
+    return opened;
   }
   return null;
 }
