@@ -41,18 +41,18 @@ export function swipeBack(client: INomixClient, deviceId: string): Promise<void>
 /**
  * Force the phone back to the Home Screen.
  *
- * Face ID iPhones: swipe up from the very bottom edge ≈ "Home gesture".
- * Works from any app and from App Library / Notification Center / Spotlight.
- * Idempotent: doing it from Home is a no-op visually.
+ * Uses the **Cmd+H** hardware-keyboard shortcut (Nomix simulates an HID
+ * keyboard). This is DETERMINISTIC — unlike the swipe-up "home gesture",
+ * which iOS interprets differently depending on swipe speed/length and which
+ * frequently lands on Spotlight or the App Switcher instead of Home, or
+ * fails to exit Safari at all. Cmd+H always exits the foreground app to the
+ * Home Screen. Verified on iPhone 15 Pro from Instagram, Safari, Telegram.
  */
 export async function goHome(
   client: INomixClient,
   deviceId: string
 ): Promise<void> {
-  await client.swipe(deviceId, [16384, 32500], {
-    up: 17500,
-    duration: 300,
-  });
+  await client.combo(deviceId, ["MetaLeft", "KeyH"]);
   await sleep(1200); // home animation
 }
 

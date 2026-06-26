@@ -152,28 +152,32 @@ const UPLOAD_CHANNEL_NAME = "creator advisor";
 /**
  * Open an iOS app via Spotlight in a SINGLE vision call.
  *
- * Algorithm:
- *   1. Open Spotlight (Cerca button), clear, type the app name.
- *   2. parseScreen ONCE.
- *   3. Find the "Applicazioni" / "Applications" section header — iOS Spotlight
- *      always renders this above its native-app results.
- *   4. Pick the topmost icon BELOW that header whose content matches the app
- *      name and looks like a native-app label (i.e. NOT a Chrome/Safari
- *      bookmark with .org / .com / "page" / "web" markers).
- *   5. Tap it. No verify — single round trip.
+ * Algorithm (1 vision call), based on the REAL Spotlight layout captured on
+ * iPhone 15 Pro (IT). Spotlight sections, top to bottom:
+ *   "Risultati migliori"  → native app: "Telegram App Icon" (button)   ← we want THIS
+ *   "Suggerimenti"        → Chrome bookmarks ("telegram", "telegram web"…)
+ *   "Siti web"            → Safari/Chrome results ("Telegram web.telegram.org"…)
  *
- * Generic: works for any app name on any iPhone. The header-anchored search
- * skips Spotlight's "Suggerimenti" / "Siti web" sections which surface
- * browser bookmarks (the Telegram-via-Chrome bug we hit).
+ * The native app icon is always the first interactive button/icon under the
+ * "Risultati migliori" (top-hits) header, with a label like "Telegram App
+ * Icon". Browser entries carry web markers (chrome / overlay / .org / web).
+ *
+ * Steps:
+ *   1. goHome via Cmd+H (deterministic — fixes the old swipe-up that stranded
+ *      us in Safari).
+ *   2. Tap the Home "Cerca" button → Spotlight (standard iOS position).
+ *   3. Clear + type "telegram".
+ *   4. parseScreen once; pick the top-hits app icon; tap.
  */
-async function openTelegramViaAppLibrary(
+async function openTelegramViaSpotlight(
   client: INomixClient,
   deviceId: string
 ): Promise<boolean> {
   await goHome(client, deviceId);
   await sleep(1500);
 
-  await client.click(deviceId, [16366, 27245]); // Cerca
+  // "Cerca" button — standard iOS position centred above the dock.
+  await client.click(deviceId, [16366, 27245]);
   await sleep(1500);
   for (let i = 0; i < 30; i++) await client.combo(deviceId, ["Backspace"]);
   await client.type(deviceId, "telegram");
@@ -182,39 +186,59 @@ async function openTelegramViaAppLibrary(
   const screen = await parseScreen(client, deviceId);
   if (!screen) return false;
 
-  // Find the "Applicazioni" / "Applications" section header to anchor on
-  // the native-app block.
-  const appsHeader = screen.elements.find(
+  // Anchor on the top-hits header so we never wander into Suggerimenti/Siti web.
+  const topHitsHeader = screen.elements.find(
     (el) =>
       el.content !== null &&
-      /^applic(ation|azion)/i.test(el.content.trim())
+      /(risultati migliori|migliori risultati|top hit|best match)/i.test(
+        el.content
+      )
+  );
+  const suggHeader = screen.elements.find(
+    (el) =>
+      el.content !== null &&
+      /(suggeriment|suggestion|siti web|websites)/i.test(el.content)
+  );
+  const lowerBound = topHitsHeader?.center[1] ?? 0;
+  const upperBound = suggHeader?.center[1] ?? Number.MAX_SAFE_INTEGER;
+
+  const isBrowserEntry = (s: string) =>
+    /(chrome|safari|edge|firefox|brave|overlay|browser|\.org|\.com|t\.me|http|web\b)/i.test(
+      s
+    );
+
+  // Primary: an icon/button labelled like the native app ("Telegram App Icon"),
+  // inside the top-hits band, with no browser markers.
+  let target = screen.elements.find(
+    (el) =>
+      el.interactivity &&
+      (el.type === "button" || el.type === "icon") &&
+      el.content !== null &&
+      /telegram/i.test(el.content) &&
+      /app icon|app$/i.test(el.content) &&
+      !isBrowserEntry(el.content) &&
+      el.center[1] > lowerBound &&
+      el.center[1] < upperBound
   );
 
-  // Candidate icons matching "telegram", sorted by y.
-  let candidates = screen.elements
-    .filter(
-      (el) =>
-        el.interactivity &&
-        el.type !== "input" &&
-        el.content !== null &&
-        /telegram/i.test(el.content) &&
-        // Exclude obvious browser bookmarks / web results
-        !/(chrome|safari|edge|firefox|brave|page|bookmark|url|web|\.org|\.com|http)/i.test(
-          el.content
-        )
-    )
-    .sort((a, b) => a.center[1] - b.center[1]);
-
-  // If we found the section header, only consider icons BELOW it.
-  if (appsHeader) {
-    const belowHeader = candidates.filter(
-      (c) => c.center[1] > appsHeader.center[1]
-    );
-    if (belowHeader.length > 0) candidates = belowHeader;
+  // Fallback: first interactive telegram element in the top-hits band.
+  if (!target) {
+    target = screen.elements
+      .filter(
+        (el) =>
+          el.interactivity &&
+          el.type !== "input" &&
+          el.content !== null &&
+          /telegram/i.test(el.content) &&
+          !isBrowserEntry(el.content) &&
+          el.center[1] > lowerBound &&
+          el.center[1] < upperBound
+      )
+      .sort((a, b) => a.center[1] - b.center[1])[0];
   }
 
-  if (candidates.length === 0) return false;
-  await client.click(deviceId, candidates[0].center);
+  if (!target) return false;
+  await client.click(deviceId, target.center);
   await sleep(5000);
   return true;
 }
@@ -224,11 +248,9 @@ async function saveVideoFromTelegram(
   deviceId: string,
   _payload: PostReelPayload
 ): Promise<boolean> {
-  // 1-4. Open Telegram via App Library (NOT Spotlight) — Spotlight's
-  // Suggerimenti / Siti web sections surface Chrome bookmarks like
-  // web.telegram.org and we'd accidentally open the wrong app. App Library
-  // contains only iOS-installed apps.
-  const opened = await openTelegramViaAppLibrary(client, deviceId);
+  // 1-4. Open the Telegram native app via Spotlight top-hits (anchored to
+  // skip the Suggerimenti / Siti web sections that surface Chrome bookmarks).
+  const opened = await openTelegramViaSpotlight(client, deviceId);
   if (!opened) return false;
 
   // 5. Navigate to the channel — Telegram remembers the last view (could be
