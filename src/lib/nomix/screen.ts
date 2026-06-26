@@ -87,11 +87,15 @@ export class Screen {
  * Capture current screen with retry. Returns null after `retries` failures —
  * callers check `if (!screen)` rather than wrapping in try/catch (per the
  * Nomix scripting convention).
+ *
+ * Nomix vision has a ~25-35s "cooldown" between successful captures (vision
+ * AI processing + frame refresh from NMX Viewer). We retry with 10s delays
+ * so a transient 404 (no fresh frame) doesn't surface as a workflow failure.
  */
 export async function parseScreen(
   client: INomixClient,
   deviceId: string,
-  { retries = 3, retryDelayMs = 3000 }: { retries?: number; retryDelayMs?: number } = {}
+  { retries = 5, retryDelayMs = 10_000 }: { retries?: number; retryDelayMs?: number } = {}
 ): Promise<Screen | null> {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
