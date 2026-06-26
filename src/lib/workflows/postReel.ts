@@ -167,16 +167,24 @@ async function saveVideoFromTelegram(
   await client.type(deviceId, "telegram");
   await sleep(2000);
 
-  // 4. VISION: find the Telegram app icon (Spotlight order varies)
+  // 4. VISION: find the Telegram NATIVE app icon. Spotlight also surfaces
+  //    Chrome bookmarks like "Telegram icon with Chrome badge" → tap on
+  //    that opens web.telegram.org in Chrome instead of the app. Filter
+  //    those out and prefer an entry explicitly labelled "app".
   const spotlight = await parseScreen(client, deviceId);
   if (!spotlight) return false;
-  const tgIcon = spotlight.elements.find(
+  const tgCandidates = spotlight.elements.filter(
     (el) =>
       el.type === "icon" &&
       el.interactivity &&
       el.content !== null &&
-      /^telegram\b/i.test(el.content)
+      /telegram/i.test(el.content) &&
+      !/(chrome|safari|web|browser|edge|firefox|brave)/i.test(el.content)
   );
+  // Prefer the one labelled "app", else the topmost (Spotlight orders apps first).
+  const tgIcon =
+    tgCandidates.find((el) => /\bapp\b/i.test(el.content!)) ??
+    tgCandidates.sort((a, b) => a.center[1] - b.center[1])[0];
   if (!tgIcon) return false;
   await client.click(deviceId, tgIcon.center);
   await sleep(5000); // Telegram cold launch
