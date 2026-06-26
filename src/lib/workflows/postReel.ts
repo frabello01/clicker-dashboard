@@ -150,33 +150,51 @@ export async function tickPostReel(
 const UPLOAD_CHANNEL_NAME = "creator advisor";
 
 /**
- * Open the Telegram native app via the iOS App Library — a "all installed
- * apps" view at the rightmost end of home pages. Unlike Spotlight, App
- * Library NEVER surfaces Chrome bookmarks or web suggestions, so a "Telegram"
- * search there is guaranteed to be the native app.
+ * Open the Telegram native app via the iOS App Library.
  *
- * Returns true once we're inside Telegram (app_name reports it), else false.
+ * App Library is iOS' organized view of ALL installed apps, reached by
+ * swiping right past the last home page. Critically:
+ *   - It contains ONLY iOS-installed apps (no Chrome bookmarks, no Safari
+ *     suggestions, no Spotlight "Suggerimenti").
+ *   - Its built-in search returns a clean list of matching apps.
+ *
+ * Generic algorithm — works for any app on any iPhone regardless of where
+ * the user has placed icons:
+ *   1. goHome (known state)
+ *   2. Swipe to next page, parseScreen; repeat until app_name detects
+ *      "App Library" (max 10 attempts, defensive).
+ *   3. Tap the App Library search field (structural: the only `input`).
+ *   4. Clear keyboard + type the app name.
+ *   5. Tap the first matching app icon in the results.
+ *   6. Verify we landed in the target app.
  */
 async function openTelegramViaAppLibrary(
   client: INomixClient,
   deviceId: string
 ): Promise<boolean> {
-  // 1. Home Screen
+  // 1. Known start state
   await goHome(client, deviceId);
   await sleep(1500);
 
-  // 2. Swipe LEFT (finger right → left, content moves left, next page revealed)
-  //    multiple times to reach App Library (the page after the last home page).
-  //    Doing 6 swipes covers most setups; extras are no-ops once at App Library.
-  for (let i = 0; i < 6; i++) {
+  // 2. Navigate to App Library by swiping left until app_name confirms
+  //    we're there. This auto-adapts to any number of home pages.
+  let reachedAppLibrary = false;
+  for (let attempt = 0; attempt < 10; attempt++) {
     await client.swipe(deviceId, [28000, 16000], {
       left: 24000,
       duration: 200,
     });
-    await sleep(700);
+    await sleep(900);
+    const state = await parseScreen(client, deviceId);
+    if (!state) continue;
+    if (/app library|libreria app/i.test(state.appName)) {
+      reachedAppLibrary = true;
+      break;
+    }
   }
+  if (!reachedAppLibrary) return false;
 
-  // 3. Tap App Library's own search bar (structural: it's the only `input`).
+  // 3. App Library's search bar is the only input on this screen.
   const lib = await parseScreen(client, deviceId);
   if (!lib) return false;
   const searchInput = lib.elements.find(
@@ -191,24 +209,28 @@ async function openTelegramViaAppLibrary(
   await client.type(deviceId, "telegram");
   await sleep(2000);
 
-  // 5. App Library search only shows iOS apps — top icon match is THE app.
+  // 5. Pick first matching app — App Library search only returns iOS apps,
+  //    so any "telegram" match is the right one. We still exclude the search
+  //    input itself (its content will contain "telegram" because we typed it).
   const results = await parseScreen(client, deviceId);
   if (!results) return false;
-  const tgIcon = results.elements.find(
-    (el) =>
-      el.interactivity &&
-      el.content !== null &&
-      /telegram/i.test(el.content) &&
-      (el.type === "icon" || el.type === "button")
-  );
+  const tgIcon = results.elements
+    .filter(
+      (el) =>
+        el.interactivity &&
+        el.type !== "input" &&
+        el.content !== null &&
+        /telegram/i.test(el.content)
+    )
+    .sort((a, b) => a.center[1] - b.center[1])[0];
   if (!tgIcon) return false;
   await client.click(deviceId, tgIcon.center);
   await sleep(5000);
 
-  // 6. Verify we landed in Telegram (defensive).
+  // 6. Verify the launch landed in Telegram (defensive — should always be true
+  //    given App Library contains only apps, but keeps the contract clear).
   const after = await parseScreen(client, deviceId);
-  const appName = (after?.appName ?? "").toLowerCase();
-  return appName.includes("telegram");
+  return /telegram/i.test(after?.appName ?? "");
 }
 
 async function saveVideoFromTelegram(
