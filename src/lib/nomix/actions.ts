@@ -56,6 +56,12 @@ export async function goHome(
   await sleep(1200); // home animation
 }
 
+function isHomeScreen(screen: Screen | null): boolean {
+  if (!screen) return false;
+  const app = screen.appName.toLowerCase();
+  return app.includes("home") || app === "springboard";
+}
+
 /** Swipe up to the next item in a vertical feed. */
 export function swipeFeed(client: INomixClient, deviceId: string): Promise<void> {
   return client.swipe(deviceId, [16383, 26213], { up: 6553, duration: 100 });
@@ -200,19 +206,32 @@ async function openViaAppLibrary(
 }
 
 /**
- * "Close" the foreground app by sending the iOS home gesture. The app goes
- * to background (still resumable, but no longer visible) and the phone
- * shows the Home Screen.
+ * "Close" the foreground app (puts it in background; phone shows Home Screen).
  *
- * Was previously a multi-step force-quit via App Switcher (Python-lib style)
- * but those swipe coordinates were unreliable across iPhone models. A plain
- * home gesture is universal AND lets the next warmup resume from the
- * existing Instagram session (faster cold-start).
+ * Tries the home gesture, verifies via parseScreen, retries with a stronger
+ * variant if needed. Important inside Reels/TikTok-style feeds where a normal
+ * upward swipe can be misinterpreted as "next item" instead of the home
+ * gesture.
  */
 export async function closeApp(
   client: INomixClient,
-  deviceId: string
+  deviceId: string,
+  { attempts = 3 }: { attempts?: number } = {}
 ): Promise<boolean> {
-  await goHome(client, deviceId);
-  return true;
+  for (let i = 1; i <= attempts; i++) {
+    await goHome(client, deviceId);
+    await sleep(1500);
+    let screen = await parseScreen(client, deviceId);
+    if (isHomeScreen(screen)) return true;
+
+    // Stronger fallback: longer flick starting closer to the very bottom edge.
+    await client.swipe(deviceId, [16384, 32700], {
+      up: 25000,
+      duration: 200,
+    });
+    await sleep(1500);
+    screen = await parseScreen(client, deviceId);
+    if (isHomeScreen(screen)) return true;
+  }
+  return false;
 }
