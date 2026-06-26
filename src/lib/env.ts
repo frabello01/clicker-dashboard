@@ -41,6 +41,15 @@ export const env = {
   get cronSecret() {
     return required("CRON_SECRET");
   },
+
+  // Telegram bridge — used by /api/posts upload endpoint to forward media
+  // to the iPhone without compression (sendDocument).
+  get telegramBotToken() {
+    return required("TELEGRAM_BOT_TOKEN");
+  },
+  get telegramUploadChatId() {
+    return required("TELEGRAM_UPLOAD_CHAT_ID");
+  },
 };
 
 /**

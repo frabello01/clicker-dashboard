@@ -14,6 +14,13 @@ import {
   type WarmupPayload,
   type WarmupState,
 } from "./warmup";
+import {
+  POST_REEL_KIND,
+  isPostReelPayload,
+  tickPostReel,
+  type PostReelPayload,
+  type PostReelState,
+} from "./postReel";
 
 /** After a successful tick that left the job in progress, when to retry. */
 const NEXT_TICK_DELAY_SECONDS = 30;
@@ -150,6 +157,69 @@ export async function runJobTick(
         done: false,
         error: result.error,
       };
+    }
+
+    case POST_REEL_KIND: {
+      if (!isPostReelPayload(job.payload)) {
+        await failJob(job.id, job.state, "invalid post_reel payload");
+        return {
+          jobId: job.id,
+          kind: job.kind,
+          done: false,
+          error: "invalid payload",
+        };
+      }
+      const payload = job.payload as PostReelPayload;
+      const state = job.state as Partial<PostReelState> | null;
+
+      let result: Awaited<ReturnType<typeof tickPostReel>>;
+      try {
+        result = await tickPostReel(
+          client,
+          job.device_id,
+          state,
+          payload,
+          deadlineMs
+        );
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        const nextState = (state ?? {}) as PostReelState;
+        const isDisc = isNmxDisconnected(message);
+        if (!isDisc && job.attempts >= MAX_ATTEMPTS) {
+          await failJob(job.id, nextState, `tick threw: ${message}`);
+          return { jobId: job.id, kind: job.kind, done: false, error: message };
+        }
+        await persistJob(job.id, nextState, {
+          nextRunInSeconds: isDisc
+            ? NMX_DISCONNECTED_DELAY_SECONDS
+            : ERROR_RETRY_DELAY_SECONDS,
+          error: `tick threw: ${message}`,
+        });
+        return { jobId: job.id, kind: job.kind, done: false, error: message };
+      }
+
+      if (result.done) {
+        await finishJob(job.id, result.state);
+        return { jobId: job.id, kind: job.kind, done: true };
+      }
+      if (result.error && job.attempts >= MAX_ATTEMPTS) {
+        await failJob(
+          job.id,
+          result.state,
+          `max attempts reached: ${result.error}`
+        );
+        return { jobId: job.id, kind: job.kind, done: false, error: result.error };
+      }
+      const isDisc = isNmxDisconnected(result.error);
+      await persistJob(job.id, result.state, {
+        nextRunInSeconds: isDisc
+          ? NMX_DISCONNECTED_DELAY_SECONDS
+          : result.error
+          ? ERROR_RETRY_DELAY_SECONDS
+          : NEXT_TICK_DELAY_SECONDS,
+        error: result.error,
+      });
+      return { jobId: job.id, kind: job.kind, done: false, error: result.error };
     }
 
     default: {
