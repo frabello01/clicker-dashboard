@@ -149,84 +149,79 @@ export async function tickPostReel(
  *  substring against element content / screen description). */
 const UPLOAD_CHANNEL_NAME = "creator advisor";
 
-async function saveVideoFromTelegram(
+/**
+ * Open the Telegram native app via the iOS App Library — a "all installed
+ * apps" view at the rightmost end of home pages. Unlike Spotlight, App
+ * Library NEVER surfaces Chrome bookmarks or web suggestions, so a "Telegram"
+ * search there is guaranteed to be the native app.
+ *
+ * Returns true once we're inside Telegram (app_name reports it), else false.
+ */
+async function openTelegramViaAppLibrary(
   client: INomixClient,
-  deviceId: string,
-  _payload: PostReelPayload
+  deviceId: string
 ): Promise<boolean> {
   // 1. Home Screen
   await goHome(client, deviceId);
   await sleep(1500);
 
-  // 2. Spotlight via "Cerca" button
-  await client.click(deviceId, [16366, 27245]);
+  // 2. Swipe LEFT (finger right → left, content moves left, next page revealed)
+  //    multiple times to reach App Library (the page after the last home page).
+  //    Doing 6 swipes covers most setups; extras are no-ops once at App Library.
+  for (let i = 0; i < 6; i++) {
+    await client.swipe(deviceId, [28000, 16000], {
+      left: 24000,
+      duration: 200,
+    });
+    await sleep(700);
+  }
+
+  // 3. Tap App Library's own search bar (structural: it's the only `input`).
+  const lib = await parseScreen(client, deviceId);
+  if (!lib) return false;
+  const searchInput = lib.elements.find(
+    (el) => el.type === "input" && el.interactivity
+  );
+  if (!searchInput) return false;
+  await client.click(deviceId, searchInput.center);
   await sleep(1500);
 
-  // 3. Clear + type
-  for (let i = 0; i < 30; i++) await client.combo(deviceId, ["Backspace"]);
+  // 4. Clear + type
+  for (let j = 0; j < 30; j++) await client.combo(deviceId, ["Backspace"]);
   await client.type(deviceId, "telegram");
   await sleep(2000);
 
-  // 4. VISION: find Telegram NATIVE app icon. iOS Spotlight has sections
-  //    in this order: Suggerimenti (Chrome bookmarks!) → Applicazioni (real
-  //    apps) → Siti web. A naive "first icon" picks the Suggerimenti bookmark.
-  //
-  //    Strict match: vision labels the actual app icon as "Telegram app icon"
-  //    or just "Telegram"; Suggerimenti/web entries get descriptive labels
-  //    like "Telegram - web", "Telegram icon with Chrome badge", etc.
-  const spotlight = await parseScreen(client, deviceId);
-  if (!spotlight) return false;
-
-  const isLikelyApp = (s: string): boolean => {
-    const t = s.trim();
-    return (
-      /^telegram$/i.test(t) ||
-      /^telegram\s+(app|app icon|messenger|icon)$/i.test(t)
-    );
-  };
-
-  // First pass: exact label match (most reliable).
-  let tgIcon = spotlight.elements.find(
+  // 5. App Library search only shows iOS apps — top icon match is THE app.
+  const results = await parseScreen(client, deviceId);
+  if (!results) return false;
+  const tgIcon = results.elements.find(
     (el) =>
-      el.type === "icon" &&
       el.interactivity &&
       el.content !== null &&
-      isLikelyApp(el.content)
+      /telegram/i.test(el.content) &&
+      (el.type === "icon" || el.type === "button")
   );
-
-  // Fallback: any telegram-icon-like element that does NOT look like a web result.
-  if (!tgIcon) {
-    const candidates = spotlight.elements
-      .filter(
-        (el) =>
-          el.type === "icon" &&
-          el.interactivity &&
-          el.content !== null &&
-          /telegram/i.test(el.content) &&
-          !/(chrome|safari|web|browser|edge|firefox|brave|page|bookmark|url|\.org|\.com|http)/i.test(
-            el.content
-          )
-      )
-      .sort((a, b) => a.center[1] - b.center[1]);
-    tgIcon = candidates[0];
-  }
-
   if (!tgIcon) return false;
   await client.click(deviceId, tgIcon.center);
   await sleep(5000);
 
-  // Verify we landed in Telegram (and not Chrome/Safari opening web.telegram.org).
-  // If wrong, try the SECOND candidate.
+  // 6. Verify we landed in Telegram (defensive).
   const after = await parseScreen(client, deviceId);
   const appName = (after?.appName ?? "").toLowerCase();
-  if (
-    !appName.includes("telegram") ||
-    /(chrome|safari|edge|firefox|brave)/i.test(appName)
-  ) {
-    // Open wrong app — bail; the dispatcher will retry. (We don't loop here
-    // because each retry burns another ~30s vision call.)
-    return false;
-  }
+  return appName.includes("telegram");
+}
+
+async function saveVideoFromTelegram(
+  client: INomixClient,
+  deviceId: string,
+  _payload: PostReelPayload
+): Promise<boolean> {
+  // 1-4. Open Telegram via App Library (NOT Spotlight) — Spotlight's
+  // Suggerimenti / Siti web sections surface Chrome bookmarks like
+  // web.telegram.org and we'd accidentally open the wrong app. App Library
+  // contains only iOS-installed apps.
+  const opened = await openTelegramViaAppLibrary(client, deviceId);
+  if (!opened) return false;
 
   // 5. Navigate to the channel — Telegram remembers the last view (could be
   //    chat list, an open chat, a media preview, etc). Be tolerant.
