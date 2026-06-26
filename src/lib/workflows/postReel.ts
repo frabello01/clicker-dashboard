@@ -265,8 +265,33 @@ async function saveVideoFromTelegram(
   deviceId: string,
   _payload: PostReelPayload
 ): Promise<boolean> {
-  // 1-4. Open the Telegram native app via the Nomix agent (robust — no
-  // Spotlight/coordinate fragility, no Chrome-bookmark bug).
+  // Delegate the whole Telegram→Photos flow to the Nomix agent. This is far
+  // more robust than coordinate/vision navigation, which kept failing on the
+  // unstable broadcast. The agent opens Telegram, finds the upload channel,
+  // opens the latest video, and saves it to Photos via the iOS share sheet.
+  const task =
+    `Open the Telegram app. Open the channel named "Creator Advisor Upload Bot". ` +
+    `Find the most recently posted video file in that channel and tap it to open the preview. ` +
+    `Then tap the iOS share button (bottom-left), and in the share sheet tap "Salva video" ` +
+    `to save the video into the Photos app. Confirm the video is saved.`;
+
+  const result = await client.agentRunToCompletion(deviceId, task, {
+    timeoutMs: 180_000,
+  });
+  if (result.status !== "completed") {
+    return false;
+  }
+  await goHome(client, deviceId);
+  await sleep(1500);
+  return true;
+}
+
+/** @deprecated kept for reference — old coordinate/vision Telegram flow. */
+async function saveVideoFromTelegram_legacy(
+  client: INomixClient,
+  deviceId: string,
+  _payload: PostReelPayload
+): Promise<boolean> {
   const tg = await openApp(client, deviceId, "telegram");
   if (!tg) return false;
   await sleep(2000);
