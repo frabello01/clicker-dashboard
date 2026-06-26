@@ -93,10 +93,7 @@ export async function openApp(
 ): Promise<Screen | null> {
   // Pre-check current state — saves a full Spotlight cycle when possible.
   const current = await parseScreen(client, deviceId);
-  if (
-    current &&
-    current.appName.toLowerCase().includes(appName.toLowerCase())
-  ) {
+  if (current && isInApp(current, appName)) {
     return current;
   }
   if (current && current.appName === "App Library") {
@@ -132,14 +129,37 @@ export async function openApp(
     });
     if (!tapped) continue;
 
-    await sleep(3000);
-    const opened = await parseScreen(client, deviceId);
-    if (
-      opened &&
-      opened.appName.toLowerCase().includes(appName.toLowerCase())
-    ) {
-      return opened;
-    }
+    const opened = await waitForApp(client, deviceId, appName);
+    if (opened) return opened;
+  }
+  return null;
+}
+
+/** Match an app by name across app_name OR screen_description — vision
+ *  sometimes reports a generic app_name during transitions but the description
+ *  still mentions the app. */
+function isInApp(screen: Screen, appName: string): boolean {
+  const needle = appName.toLowerCase();
+  if (screen.appName.toLowerCase().includes(needle)) return true;
+  if (screen.description.toLowerCase().includes(needle)) return true;
+  return false;
+}
+
+/** After tapping an app icon, the app may take 3-8s to render. Poll briefly. */
+async function waitForApp(
+  client: INomixClient,
+  deviceId: string,
+  appName: string,
+  { totalTimeoutMs = 10_000, intervalMs = 2000 }: { totalTimeoutMs?: number; intervalMs?: number } = {}
+): Promise<Screen | null> {
+  const deadline = Date.now() + totalTimeoutMs;
+  // First poll after a brief initial wait (covers the standard launch animation).
+  await sleep(2500);
+  while (Date.now() < deadline) {
+    const screen = await parseScreen(client, deviceId);
+    if (screen && isInApp(screen, appName)) return screen;
+    if (Date.now() + intervalMs >= deadline) break;
+    await sleep(intervalMs);
   }
   return null;
 }
@@ -176,15 +196,7 @@ async function openViaAppLibrary(
   });
   if (!tapped) return null;
 
-  await sleep(3000);
-  const opened = await parseScreen(client, deviceId);
-  if (
-    opened &&
-    opened.appName.toLowerCase().includes(appName.toLowerCase())
-  ) {
-    return opened;
-  }
-  return null;
+  return waitForApp(client, deviceId, appName);
 }
 
 /**
