@@ -7,6 +7,7 @@
  */
 
 import type { INomixClient } from "./client";
+import type { Coords } from "./types";
 import { Screen, parseScreen } from "./screen";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -114,31 +115,97 @@ export async function openApp(
   }
 
   for (let attempt = 1; attempt <= retries; attempt++) {
-    // Ensure clean state — Spotlight gesture only behaves consistently from
-    // Home Screen across iOS versions / jailbreak tweaks.
+    // Cmd+H to a known Home state, then tap the "Cerca" button to open
+    // Spotlight. The swipe-down gesture we used before was unreliable — it
+    // frequently failed to open Spotlight at all, so the typed text went
+    // nowhere and the app never launched.
     await goHome(client, deviceId);
+    await sleep(1200);
 
-    await client.swipe(deviceId, [16000, 10000], { down: 8000, duration: 300 });
-    await sleep(500);
+    await client.click(deviceId, SPOTLIGHT_SEARCH_BUTTON);
+    await sleep(1500);
 
-    // Spotlight remembers the previous search across invocations. Clear it
-    // before typing or we end up with "DriveInstagram" etc.
+    // Spotlight remembers the previous search; clear it before typing.
     await clearKeyboardInput(client, deviceId);
     await client.type(deviceId, appName);
-    await sleep(2000);
+    await sleep(2500);
 
     const search = await parseScreen(client, deviceId);
     if (!search) continue;
-    // Tap icon/button only — never the input field (which contains our query).
-    const tapped = await search.findAndClick(client, deviceId, appName, {
-      types: ["icon", "button"],
-    });
-    if (!tapped) continue;
+
+    const target = findTopHitAppIcon(search, appName);
+    if (!target) continue;
+    await client.click(deviceId, target);
 
     const opened = await waitForApp(client, deviceId, appName);
     if (opened) return opened;
   }
   return null;
+}
+
+/** "Cerca" button on the iOS Home Screen — centred just above the dock.
+ *  Standard iOS position (system UI, not app-specific). */
+const SPOTLIGHT_SEARCH_BUTTON: Coords = [16366, 27245];
+
+/**
+ * Find the native-app icon for `appName` in a Spotlight result screen.
+ *
+ * iOS Spotlight sections (top→bottom): "Risultati migliori" (top hits — the
+ * native app), "Suggerimenti" (browser bookmarks!), "Siti web" (web results).
+ * We pick the first interactive icon/button matching the app name within the
+ * top-hits band, skipping anything with browser/web markers. This avoids
+ * accidentally opening web.<app>.org in Chrome (the bug we hit with Telegram).
+ */
+function findTopHitAppIcon(screen: Screen, appName: string): Coords | null {
+  const needle = appName.toLowerCase();
+  const topHits = screen.elements.find(
+    (el) =>
+      el.content !== null &&
+      /(risultati migliori|migliori risultati|top hit|best match)/i.test(
+        el.content
+      )
+  );
+  const sugg = screen.elements.find(
+    (el) =>
+      el.content !== null &&
+      /(suggeriment|suggestion|siti web|websites)/i.test(el.content)
+  );
+  const lo = topHits?.center[1] ?? 0;
+  const hi = sugg?.center[1] ?? Number.MAX_SAFE_INTEGER;
+
+  const isBrowser = (s: string) =>
+    /(chrome|safari|edge|firefox|brave|overlay|browser|\.org|\.com|t\.me|http|web\b)/i.test(
+      s
+    );
+
+  // Prefer a label that looks like an app icon ("Instagram App Icon").
+  const primary = screen.elements.find(
+    (el) =>
+      el.interactivity &&
+      (el.type === "icon" || el.type === "button") &&
+      el.content !== null &&
+      el.content.toLowerCase().includes(needle) &&
+      /app icon|app$/i.test(el.content) &&
+      !isBrowser(el.content) &&
+      el.center[1] > lo &&
+      el.center[1] < hi
+  );
+  if (primary) return primary.center;
+
+  // Fallback: first interactive match in the top-hits band.
+  const fallback = screen.elements
+    .filter(
+      (el) =>
+        el.interactivity &&
+        el.type !== "input" &&
+        el.content !== null &&
+        el.content.toLowerCase().includes(needle) &&
+        !isBrowser(el.content) &&
+        el.center[1] > lo &&
+        el.center[1] < hi
+    )
+    .sort((a, b) => a.center[1] - b.center[1])[0];
+  return fallback?.center ?? null;
 }
 
 /** Match an app by name across app_name OR screen_description — vision
