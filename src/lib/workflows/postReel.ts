@@ -184,7 +184,18 @@ async function openTelegramViaSpotlight(
   await sleep(2000);
 
   const screen = await parseScreen(client, deviceId);
-  if (!screen) return false;
+  if (!screen) {
+    console.log("[openTelegram] parseScreen returned null (no frame)");
+    return false;
+  }
+  console.log(
+    `[openTelegram] app=${screen.appName} telegram-elements=`,
+    JSON.stringify(
+      screen.elements
+        .filter((e) => e.content && /telegram/i.test(e.content))
+        .map((e) => ({ t: e.type, c: e.content, y: e.center[1], i: e.interactivity }))
+    )
+  );
 
   // Anchor on the top-hits header so we never wander into Suggerimenti/Siti web.
   const topHitsHeader = screen.elements.find(
@@ -237,7 +248,13 @@ async function openTelegramViaSpotlight(
       .sort((a, b) => a.center[1] - b.center[1])[0];
   }
 
-  if (!target) return false;
+  if (!target) {
+    console.log("[openTelegram] no target found after filtering");
+    return false;
+  }
+  console.log(
+    `[openTelegram] tapping target='${target.content}' @ (${target.center.join(",")})`
+  );
   await client.click(deviceId, target.center);
   await sleep(5000);
   return true;
