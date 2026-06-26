@@ -145,25 +145,29 @@ export async function tickPostReel(
  * varies) and finding the latest video in the chat (position depends on
  * message count).
  */
+/** Match keyword that uniquely identifies our upload channel (case-insensitive
+ *  substring against element content / screen description). */
+const UPLOAD_CHANNEL_NAME = "creator advisor";
+
 async function saveVideoFromTelegram(
   client: INomixClient,
   deviceId: string,
   _payload: PostReelPayload
 ): Promise<boolean> {
-  // 1. Make sure we're on Home Screen
+  // 1. Home Screen
   await goHome(client, deviceId);
   await sleep(1500);
 
-  // 2. Open Spotlight via the "Cerca" button at the bottom of home screen
+  // 2. Spotlight via "Cerca" button
   await client.click(deviceId, [16366, 27245]);
   await sleep(1500);
 
-  // 3. Clear any leftover query, then type "telegram"
+  // 3. Clear + type
   for (let i = 0; i < 30; i++) await client.combo(deviceId, ["Backspace"]);
   await client.type(deviceId, "telegram");
   await sleep(2000);
 
-  // 4. VISION: find the Telegram app icon (position in Spotlight varies)
+  // 4. VISION: find the Telegram app icon (Spotlight order varies)
   const spotlight = await parseScreen(client, deviceId);
   if (!spotlight) return false;
   const tgIcon = spotlight.elements.find(
@@ -177,9 +181,10 @@ async function saveVideoFromTelegram(
   await client.click(deviceId, tgIcon.center);
   await sleep(5000); // Telegram cold launch
 
-  // 5. Tap the "Creator Advisor Upload Bot" channel row (top of chat list)
-  await client.click(deviceId, [15564, 7437]);
-  await sleep(4000);
+  // 5. Navigate to the channel — Telegram remembers the last view (could be
+  //    chat list, an open chat, a media preview, etc). Be tolerant.
+  const reached = await navigateToUploadChannel(client, deviceId);
+  if (!reached) return false;
 
   // 6. VISION: find the most recent video in the chat (bottom-most file)
   const chat = await parseScreen(client, deviceId);
@@ -193,30 +198,96 @@ async function saveVideoFromTelegram(
   if (videos.length === 0) return false;
   const latest = videos.sort((a, b) => b.center[1] - a.center[1])[0];
   await client.click(deviceId, latest.center);
-  await sleep(4500); // iOS opens the file in Photos/Files preview
+  await sleep(4500);
 
-  // 7. Tap the iOS share button (bottom-left of preview)
+  // 7. iOS share button
   await client.click(deviceId, [2588, 30505]);
-  await sleep(3000); // share sheet animation
+  await sleep(3000);
 
-  // 8. Scroll the share-sheet actions list up so "Salva video" comes into view.
-  //    Small drag inside the modal — too much would dismiss it or tap an action.
-  await client.swipe(deviceId, [16384, 28000], {
-    up: 7000,
-    duration: 400,
-  });
+  // 8. Scroll share-sheet actions list up so "Salva video" is on-screen
+  await client.swipe(deviceId, [16384, 28000], { up: 7000, duration: 400 });
   await sleep(1500);
 
-  // 9. Tap "Salva video" — its on-screen y is consistent after the scroll above
-  //    on iPhone 15 Pro. (Captured: 16367, 21380.)
+  // 9. Tap "Salva video"
   await client.click(deviceId, [16367, 21380]);
-  await sleep(5000); // save-to-Photos completion
+  await sleep(5000);
 
-  // 10. Return to Home Screen so the next phase starts clean.
+  // 10. Return to Home Screen
   await goHome(client, deviceId);
   await sleep(1500);
-
   return true;
+}
+
+/**
+ * Navigate inside Telegram to the upload channel's chat view, regardless of
+ * what Telegram opens to (chat list / inside a different chat / media preview).
+ *
+ * Strategy: up to 4 vision-guided attempts.
+ *   - If the channel title is visible in the top-bar area → we're already inside, done.
+ *   - Else if a chat row matching the channel name is interactive → tap it, retry.
+ *   - Else if a "Back" button exists → tap it to go up one level, retry.
+ *   - Else → fail.
+ */
+async function navigateToUploadChannel(
+  client: INomixClient,
+  deviceId: string
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const screen = await parseScreen(client, deviceId);
+    if (!screen) return false;
+
+    // Already inside the channel? Telegram puts the chat title in the top bar
+    // (y typically < 6000 on iPhone 15 Pro).
+    const titleInTop = screen.elements.find(
+      (el) =>
+        el.center[1] < 6000 &&
+        el.content !== null &&
+        el.content.toLowerCase().includes(UPLOAD_CHANNEL_NAME)
+    );
+    if (titleInTop) {
+      // Also verify we can see message/file content (we're truly inside, not on chat list)
+      const hasMessages = screen.elements.some(
+        (el) =>
+          el.content !== null &&
+          /file message|chat message|\.(mov|mp4)/i.test(el.content)
+      );
+      if (hasMessages) return true;
+    }
+
+    // Channel row visible in chat list? Tap it.
+    const chatRow = screen.elements.find(
+      (el) =>
+        el.interactivity &&
+        el.content !== null &&
+        el.content.toLowerCase().includes(UPLOAD_CHANNEL_NAME) &&
+        el.center[1] > 6000 // below the top bar, so it's a list row not a header
+    );
+    if (chatRow) {
+      await client.click(deviceId, chatRow.center);
+      await sleep(3000);
+      continue;
+    }
+
+    // Else: try going back one level (top-left back button).
+    const backBtn = screen.elements.find(
+      (el) =>
+        el.interactivity &&
+        el.center[1] < 5000 &&
+        el.center[0] < 5000 &&
+        el.content !== null &&
+        /back|indietro|fine|chiudi|close|chat|sfoglia/i.test(el.content)
+    );
+    if (backBtn) {
+      await client.click(deviceId, backBtn.center);
+      await sleep(2000);
+      continue;
+    }
+
+    // Last resort: an iOS swipe-back gesture (right swipe from left edge)
+    await client.swipe(deviceId, [200, 16000], { right: 25000, duration: 300 });
+    await sleep(2000);
+  }
+  return false;
 }
 
 /**
