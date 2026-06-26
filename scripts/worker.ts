@@ -24,6 +24,8 @@ import {
   type Job,
 } from "@/lib/workflows/queue";
 import { runJobTick } from "@/lib/workflows";
+import { getNomixClient } from "@/lib/nomix";
+import { goHome } from "@/lib/nomix/actions";
 
 const POLL_INTERVAL_MS = 5_000;
 const PER_TICK_BUDGET_MS = 55 * 60 * 1000; // 55 minutes per single tick call
@@ -43,6 +45,23 @@ process.on("SIGTERM", () => {
   stopping = true;
 });
 
+/**
+ * Best-effort cleanup after a job ends (done, cancelled, or failed). Sends
+ * the device back to its Home Screen so the next warmup starts from a known
+ * state and the user doesn't find Instagram still open on the phone.
+ */
+async function cleanupDevice(deviceId: string | null): Promise<void> {
+  if (!deviceId) return;
+  try {
+    await goHome(getNomixClient(), deviceId);
+  } catch (e) {
+    console.warn(
+      `[${ts()}] cleanup goHome failed for ${deviceId}:`,
+      e instanceof Error ? e.message : String(e)
+    );
+  }
+}
+
 async function processClaimedJob(initial: Job): Promise<void> {
   let job: Job | null = initial;
   let loops = 0;
@@ -53,6 +72,7 @@ async function processClaimedJob(initial: Job): Promise<void> {
       console.log(
         `[${ts()}] Job ${job.id} status changed to ${job.status} — releasing`
       );
+      await cleanupDevice(job.device_id);
       return;
     }
     const deadlineMs = Date.now() + PER_TICK_BUDGET_MS;
@@ -60,7 +80,10 @@ async function processClaimedJob(initial: Job): Promise<void> {
     console.log(
       `[${ts()}] tick ${job.id} done=${result.done} error=${result.error ?? "-"} (loop ${loops}/${MAX_TICK_LOOPS})`
     );
-    if (result.done) return;
+    if (result.done) {
+      await cleanupDevice(job.device_id);
+      return;
+    }
 
     if (result.error) {
       consecutiveErrors += 1;
@@ -73,6 +96,7 @@ async function processClaimedJob(initial: Job): Promise<void> {
         console.error(
           `[${ts()}] Job ${job.id} aborted: ${consecutiveErrors} consecutive errors`
         );
+        await cleanupDevice(job.device_id);
         return;
       }
     } else {
@@ -88,6 +112,7 @@ async function processClaimedJob(initial: Job): Promise<void> {
   if (loops >= MAX_TICK_LOOPS && job) {
     await failJob(job.id, job.state, "worker hit MAX_TICK_LOOPS safety cap");
     console.error(`[${ts()}] Job ${job.id} aborted: MAX_TICK_LOOPS reached`);
+    await cleanupDevice(job.device_id);
   }
 }
 

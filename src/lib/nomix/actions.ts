@@ -187,37 +187,20 @@ async function openViaAppLibrary(
   return null;
 }
 
-async function doCloseApp(
-  client: INomixClient,
-  deviceId: string
-): Promise<void> {
-  await sleep(1000);
-  // Slow swipe up from bottom edge -> app switcher
-  await client.swipe(deviceId, [16384, 32767], { up: 4767, duration: 1000 });
-  await sleep(5000);
-  // Swipe up on the last app card to dismiss it
-  await client.swipe(deviceId, [26500, 20000], { up: 10000, duration: 300 });
-  await sleep(5000);
-  // Tap home area to exit the app switcher
-  await client.click(deviceId, [16384, 30000], 100);
-}
-
 /**
- * Open the app switcher, dismiss the last app, return to Home Screen.
- * Verifies the device actually reached Home; retries on failure.
+ * "Close" the foreground app by sending the iOS home gesture. The app goes
+ * to background (still resumable, but no longer visible) and the phone
+ * shows the Home Screen.
+ *
+ * Was previously a multi-step force-quit via App Switcher (Python-lib style)
+ * but those swipe coordinates were unreliable across iPhone models. A plain
+ * home gesture is universal AND lets the next warmup resume from the
+ * existing Instagram session (faster cold-start).
  */
 export async function closeApp(
   client: INomixClient,
-  deviceId: string,
-  { retries = 3 }: { retries?: number } = {}
+  deviceId: string
 ): Promise<boolean> {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    await doCloseApp(client, deviceId);
-    await sleep(3000);
-    const screen = await parseScreen(client, deviceId);
-    if (!screen || screen.appName.toLowerCase() === "home screen") {
-      return true;
-    }
-  }
-  return false;
+  await goHome(client, deviceId);
+  return true;
 }
