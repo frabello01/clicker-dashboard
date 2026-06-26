@@ -11,6 +11,22 @@ import { Screen, parseScreen } from "./screen";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * Clear any pre-existing text from a focused keyboard input by spamming
+ * Backspace. iOS Spotlight in particular remembers the previous query
+ * across invocations, so without this `type("instagram")` after a previous
+ * "Drive" search becomes "DriveInstagram".
+ */
+async function clearKeyboardInput(
+  client: INomixClient,
+  deviceId: string,
+  maxChars = 40
+): Promise<void> {
+  for (let i = 0; i < maxChars; i++) {
+    await client.combo(deviceId, ["Backspace"]);
+  }
+}
+
 /** Sleep a random duration to simulate human-like timing variance. */
 export function randomSleep(minS = 0.3, maxS = 0.8): Promise<void> {
   const ms = (Math.random() * (maxS - minS) + minS) * 1000;
@@ -102,6 +118,9 @@ export async function openApp(
     await client.swipe(deviceId, [16000, 10000], { down: 8000, duration: 300 });
     await sleep(500);
 
+    // Spotlight remembers the previous search across invocations. Clear it
+    // before typing or we end up with "DriveInstagram" etc.
+    await clearKeyboardInput(client, deviceId);
     await client.type(deviceId, appName);
     await sleep(2000);
 
@@ -145,6 +164,8 @@ async function openViaAppLibrary(
 
   await client.click(deviceId, searchInput.center);
   await sleep(800);
+  // Clear any leftover query (App Library remembers last search like Spotlight).
+  await clearKeyboardInput(client, deviceId);
   await client.type(deviceId, appName);
   await sleep(1500);
 

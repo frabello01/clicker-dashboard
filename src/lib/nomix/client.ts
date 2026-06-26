@@ -43,6 +43,7 @@ export interface INomixClient {
     options?: { isPressed?: boolean; duration?: number }
   ): Promise<ApiResult>;
   type(deviceId: string, text: string, delayMs?: number): Promise<ApiResult>;
+  combo(deviceId: string, codes: string[]): Promise<ApiResult>;
   scroll(
     deviceId: string,
     x: number,
@@ -148,6 +149,17 @@ export class NomixClient implements INomixClient {
         is_pressed: options.isPressed ?? false,
         duration: options.duration ?? 300,
       }),
+    });
+  }
+
+  /**
+   * Press a key combo (e.g. ["Backspace"] or ["MetaLeft", "Space"]).
+   * Maps to POST /{id}/keyboard/combo. Codes use the W3C UI Events KeyboardEvent.code values.
+   */
+  combo(deviceId: string, codes: string[]): Promise<ApiResult> {
+    return this.req<ApiResult>(`/${deviceId}/keyboard/combo`, {
+      method: "POST",
+      body: JSON.stringify({ codes }),
     });
   }
 

@@ -252,7 +252,9 @@ function JobRow({
           {job.attempts}
         </button>
         <button onClick={onToggle} className="text-left text-[12px] text-fg-muted">
-          {relativeTime(job.next_run_at)}
+          {job.status === "running"
+            ? "running now"
+            : relativeTime(job.next_run_at)}
         </button>
         <div className="flex justify-end">
           <Badge tone={statusTone(job.status)}>{job.status}</Badge>

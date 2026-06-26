@@ -128,6 +128,12 @@ export class MockNomixClient implements INomixClient {
     return ok();
   }
 
+  async combo(deviceId: string, codes: string[]): Promise<ApiResult> {
+    this.log("combo", { deviceId, codes });
+    await sleep(50);
+    return ok();
+  }
+
   async scroll(
     deviceId: string,
     x: number,
