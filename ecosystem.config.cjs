@@ -22,6 +22,12 @@ module.exports = {
       restart_delay: 5000,
       // Memory cap: if the worker hits this, pm2 restarts it.
       max_memory_restart: "500M",
+      // Give the worker up to 60s to finish its current tick after SIGINT,
+      // before pm2 sends SIGKILL. Default 1600ms kills mid-scroll, leaving
+      // the phone stuck on whatever reel was visible. The worker's SIGINT
+      // handler flips `stopping = true`; the in-flight tick completes; the
+      // outer loop then exits cleanly.
+      kill_timeout: 60000,
       // Capture both stdout and stderr to the same merged log.
       merge_logs: true,
       out_file: "/var/log/clicker-worker.out.log",
