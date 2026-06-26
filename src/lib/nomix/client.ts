@@ -23,11 +23,33 @@ export class NomixError extends Error {
   }
 }
 
+export type AgentTask = {
+  task_id: string;
+  device_id: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  task: string;
+  result: string | null;
+  steps_completed: number;
+};
+
 export interface INomixClient {
   // Device management
   listDevices(): Promise<string[]>;
   getStatus(deviceId: string): Promise<DeviceStatus>;
   restart(deviceId: string): Promise<ApiResult>;
+
+  // Autonomous AI agent — navigates the phone from a natural-language task.
+  // Robust for "open app X" / "go to the Reels tab" where coordinate-based
+  // automation is brittle. One task per device at a time.
+  agentRun(deviceId: string, task: string): Promise<AgentTask>;
+  agentStatus(deviceId: string, taskId: string): Promise<AgentTask>;
+  /** Run + poll to completion. Returns the final task (or last polled state
+   *  on timeout). */
+  agentRunToCompletion(
+    deviceId: string,
+    task: string,
+    opts?: { pollMs?: number; timeoutMs?: number }
+  ): Promise<AgentTask>;
 
   // Low-level input (1:1 with REST)
   clickAt(deviceId: string, duration?: number): Promise<ApiResult>;
@@ -108,6 +130,45 @@ export class NomixClient implements INomixClient {
 
   restart(deviceId: string): Promise<ApiResult> {
     return this.req<ApiResult>(`/${deviceId}/restart`, { method: "POST" });
+  }
+
+  // ----- Autonomous AI agent -----
+
+  agentRun(deviceId: string, task: string): Promise<AgentTask> {
+    return this.req<AgentTask>(`/${deviceId}/agent/run`, {
+      method: "POST",
+      body: JSON.stringify({ task }),
+    });
+  }
+
+  agentStatus(deviceId: string, taskId: string): Promise<AgentTask> {
+    return this.req<AgentTask>(`/${deviceId}/agent/${taskId}`);
+  }
+
+  async agentRunToCompletion(
+    deviceId: string,
+    task: string,
+    { pollMs = 5000, timeoutMs = 180_000 }: { pollMs?: number; timeoutMs?: number } = {}
+  ): Promise<AgentTask> {
+    const started = await this.agentRun(deviceId, task);
+    const deadline = Date.now() + timeoutMs;
+    let last = started;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      try {
+        last = await this.agentStatus(deviceId, started.task_id);
+      } catch {
+        continue; // transient — keep polling
+      }
+      if (
+        last.status === "completed" ||
+        last.status === "failed" ||
+        last.status === "cancelled"
+      ) {
+        return last;
+      }
+    }
+    return last;
   }
 
   // ----- Low-level input -----

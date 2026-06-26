@@ -98,22 +98,36 @@ export async function openApp(
   appName: string,
   { retries = 1 }: { retries?: number } = {}
 ): Promise<Screen | null> {
-  // Pre-check current state — saves a full Spotlight cycle when possible.
+  // Pre-check current state — saves work when we're already in the app.
   const current = await parseScreen(client, deviceId);
   if (current && isInApp(current, appName)) {
     return current;
   }
-  if (current && current.appName === "App Library") {
-    const viaLibrary = await openViaAppLibrary(
-      client,
+
+  // PRIMARY METHOD: the Nomix autonomous agent. Far more robust than
+  // coordinate/Spotlight automation — it navigates the phone itself and is
+  // immune to home-screen layout, Spotlight result ordering (Chrome bookmark
+  // bug), iOS language, and unreliable swipe gestures. ~10-30s per open.
+  try {
+    const result = await client.agentRunToCompletion(
       deviceId,
-      appName,
-      current
+      `Open the ${appName} app. If it is already open, do nothing.`,
+      { timeoutMs: 90_000 }
     );
-    if (viaLibrary) return viaLibrary;
-    // Fall through to Spotlight if App Library search failed.
+    if (result.status === "completed") {
+      const opened = await waitForApp(client, deviceId, appName, {
+        totalTimeoutMs: 12_000,
+      });
+      if (opened) return opened;
+    }
+  } catch (e) {
+    console.warn(
+      `openApp(${appName}): agent path failed, falling back to Spotlight:`,
+      e instanceof Error ? e.message : String(e)
+    );
   }
 
+  // FALLBACK: Spotlight (kept for environments without agent quota).
   for (let attempt = 1; attempt <= retries; attempt++) {
     // Cmd+H to a known Home state, then tap the "Cerca" button to open
     // Spotlight. The swipe-down gesture we used before was unreliable — it

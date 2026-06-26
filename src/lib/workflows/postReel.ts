@@ -265,10 +265,11 @@ async function saveVideoFromTelegram(
   deviceId: string,
   _payload: PostReelPayload
 ): Promise<boolean> {
-  // 1-4. Open the Telegram native app via Spotlight top-hits (anchored to
-  // skip the Suggerimenti / Siti web sections that surface Chrome bookmarks).
-  const opened = await openTelegramViaSpotlight(client, deviceId);
-  if (!opened) return false;
+  // 1-4. Open the Telegram native app via the Nomix agent (robust — no
+  // Spotlight/coordinate fragility, no Chrome-bookmark bug).
+  const tg = await openApp(client, deviceId, "telegram");
+  if (!tg) return false;
+  await sleep(2000);
 
   // 5. Navigate to the channel — Telegram remembers the last view (could be
   //    chat list, an open chat, a media preview, etc). Be tolerant.

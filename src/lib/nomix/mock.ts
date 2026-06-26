@@ -13,7 +13,7 @@ import type {
   ScrollDirection,
   SwipeOptions,
 } from "./types";
-import type { INomixClient } from "./client";
+import type { AgentTask, INomixClient } from "./client";
 
 const ok = (msg = "mock ok"): ApiResult => ({ success: true, message: msg });
 
@@ -93,6 +93,46 @@ export class MockNomixClient implements INomixClient {
     this.log("restart", { deviceId });
     await sleep(200);
     return ok("restart queued");
+  }
+
+  async agentRun(deviceId: string, task: string): Promise<AgentTask> {
+    this.log("agentRun", { deviceId, task });
+    return {
+      task_id: "mock-task",
+      device_id: deviceId,
+      status: "pending",
+      task,
+      result: null,
+      steps_completed: 0,
+    };
+  }
+
+  async agentStatus(deviceId: string, taskId: string): Promise<AgentTask> {
+    this.log("agentStatus", { deviceId, taskId });
+    return {
+      task_id: taskId,
+      device_id: deviceId,
+      status: "completed",
+      task: "mock",
+      result: "mock agent done",
+      steps_completed: 1,
+    };
+  }
+
+  async agentRunToCompletion(
+    deviceId: string,
+    task: string
+  ): Promise<AgentTask> {
+    this.log("agentRunToCompletion", { deviceId, task });
+    await sleep(500);
+    return {
+      task_id: "mock-task",
+      device_id: deviceId,
+      status: "completed",
+      task,
+      result: "mock agent done",
+      steps_completed: 1,
+    };
   }
 
   async clickAt(deviceId: string, duration = 100): Promise<ApiResult> {
